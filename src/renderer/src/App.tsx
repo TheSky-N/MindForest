@@ -50,10 +50,14 @@ export default function App() {
     const offDelta = window.mindforest.chat.onDelta((event) => store().applyDelta(event))
     const offDone = window.mindforest.chat.onDone((event) => store().applyChatResult(event))
     const offError = window.mindforest.chat.onError((event) => store().applyChatResult(event))
+    const offTitle = window.mindforest.cards.onTitleUpdated((card) =>
+      store().applyTitleUpdated(card)
+    )
     return () => {
       offDelta()
       offDone()
       offError()
+      offTitle()
     }
   }, [])
 

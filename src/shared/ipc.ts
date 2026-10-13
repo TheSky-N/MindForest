@@ -12,6 +12,8 @@ export const IPC = {
   cardsCreateBranch: 'cards:createBranch',
   cardsRename: 'cards:rename',
   cardsDelete: 'cards:delete',
+  cardsGenerateTitle: 'cards:generateTitle',
+  cardsTitleUpdated: 'cards:titleUpdated',
   conversationsGetByCard: 'conversations:getByCard',
   messagesList: 'messages:list',
   messagesAppendUser: 'messages:appendUser',

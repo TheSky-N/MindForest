@@ -9,6 +9,7 @@ import {
   normalizePreferences
 } from '../../src/renderer/src/theme/palettes'
 import { CODE_FONT_PRESETS, UI_FONT_PRESETS } from '../../src/renderer/src/theme/fonts'
+import { DEFAULT_TREE_APPEARANCE, normalizeTaskPreferences } from '@shared/types'
 
 const themesCss = readFileSync(
   resolve(process.cwd(), 'src/renderer/src/assets/themes.css'),
@@ -65,13 +66,29 @@ describe('主题注册表', () => {
       mode: 'light',
       themeId: 'nord',
       fontUi: '',
-      fontCode: ''
+      fontCode: '',
+      tree: DEFAULT_TREE_APPEARANCE
     })
     expect(normalizePreferences({ mode: 'bad', themeId: 42, fontUi: 7 })).toEqual({
       mode: 'dark',
       themeId: 'forest',
       fontUi: '',
-      fontCode: ''
+      fontCode: '',
+      tree: DEFAULT_TREE_APPEARANCE
+    })
+    expect(
+      normalizePreferences({
+        tree: { aspect: '1:1', shape: 'pill', edge: 'step' }
+      }).tree
+    ).toEqual({ aspect: '1:1', shape: 'pill', edge: 'step' })
+    expect(
+      normalizePreferences({ tree: { aspect: '9:9', shape: 'circle', edge: 'zigzag' } }).tree
+    ).toEqual(DEFAULT_TREE_APPEARANCE)
+    expect(normalizeTaskPreferences({ summaryProfileId: 'abc' })).toEqual({
+      summaryProfileId: 'abc'
+    })
+    expect(normalizeTaskPreferences({ summaryProfileId: 7 })).toEqual({
+      summaryProfileId: ''
     })
   })
 

@@ -14,12 +14,18 @@ import type {
   Message,
   MessageQuote,
   Project,
-  QuoteInput
+  QuoteInput,
+  TaskPreferences
 } from '@shared/types'
-import { DEFAULT_PREFERENCES } from '@shared/types'
+import {
+  DEFAULT_PREFERENCES,
+  DEFAULT_TASK_PREFERENCES,
+  normalizeTaskPreferences
+} from '@shared/types'
 import { normalizePreferences } from '../theme/palettes'
 
 export const PREFERENCES_KEY = 'preferences.appearance'
+export const TASK_PREFERENCES_KEY = 'preferences.tasks'
 export const LAYOUT_STORAGE_KEY = 'mindforest.layout.v1'
 
 interface AppState {
@@ -40,6 +46,8 @@ interface AppState {
   busy: boolean
   systemDark: boolean
   preferences: AppPreferences
+  taskPreferences: TaskPreferences
+  titleGenerating: string[]
   panelsCollapsed: { sidebar: boolean; tree: boolean }
   layoutVersion: number
   initialize: () => Promise<void>
@@ -51,6 +59,7 @@ interface AppState {
   refreshCards: (projectId: string) => Promise<Card[]>
   createChildCard: (parentCardId: string) => Promise<void>
   createBranchCard: (fromMessageId: string) => Promise<void>
+  createBranchFromCard: (cardId: string) => Promise<void>
   renameCard: (id: string, title: string) => Promise<void>
   deleteCard: (id: string) => Promise<void>
   deleteTurn: (turnIndex: number) => Promise<void>
@@ -70,7 +79,10 @@ interface AppState {
   removeProfile: (id: string) => Promise<void>
   setActiveProfile: (id: string) => Promise<void>
   testProfile: (id: string) => Promise<LlmProfileTestResult>
+  generateCardTitle: (cardId: string) => Promise<void>
+  applyTitleUpdated: (card: Card) => void
   setPreferences: (patch: Partial<AppPreferences>) => Promise<void>
+  setTaskPreferences: (patch: Partial<TaskPreferences>) => Promise<void>
   togglePanel: (panel: 'sidebar' | 'tree') => void
   setPanelCollapsed: (panel: 'sidebar' | 'tree', collapsed: boolean) => void
   resetLayout: () => void
@@ -105,18 +117,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   busy: false,
   systemDark: true,
   preferences: DEFAULT_PREFERENCES,
+  taskPreferences: DEFAULT_TASK_PREFERENCES,
+  titleGenerating: [],
   panelsCollapsed: { sidebar: false, tree: false },
   layoutVersion: 0,
 
   initialize: async () => {
     set({ busy: true })
     try {
-      const [info, projects, profiles, storedPreferences] = await Promise.all([
-        window.mindforest.app.getInfo(),
-        window.mindforest.projects.list(),
-        window.mindforest.llmProfiles.list(),
-        window.mindforest.settings.get({ key: PREFERENCES_KEY })
-      ])
+      const [info, projects, profiles, storedPreferences, storedTaskPreferences] =
+        await Promise.all([
+          window.mindforest.app.getInfo(),
+          window.mindforest.projects.list(),
+          window.mindforest.llmProfiles.list(),
+          window.mindforest.settings.get({ key: PREFERENCES_KEY }),
+          window.mindforest.settings.get({ key: TASK_PREFERENCES_KEY })
+        ])
       let preferences = DEFAULT_PREFERENCES
       if (storedPreferences) {
         try {
@@ -125,7 +141,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           preferences = { ...DEFAULT_PREFERENCES }
         }
       }
-      set({ info, projects, profiles, preferences, initialized: true, error: null })
+      let taskPreferences = DEFAULT_TASK_PREFERENCES
+      if (storedTaskPreferences) {
+        try {
+          taskPreferences = normalizeTaskPreferences(JSON.parse(storedTaskPreferences))
+        } catch {
+          taskPreferences = { ...DEFAULT_TASK_PREFERENCES }
+        }
+      }
+      set({ info, projects, profiles, preferences, taskPreferences, initialized: true, error: null })
       if (projects.length > 0) await get().selectProject(projects[0]!.id)
     } catch (error) {
       set({ error: errorMessage(error), initialized: true })
@@ -243,6 +267,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!sourceCardId) return
     try {
       const card = await window.mindforest.cards.createBranch({ sourceCardId, fromMessageId })
+      await get().refreshCards(card.projectId)
+      await get().selectCard(card.id)
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  createBranchFromCard: async (cardId) => {
+    try {
+      const card = await window.mindforest.cards.createBranch({ sourceCardId: cardId })
       await get().refreshCards(card.projectId)
       await get().selectCard(card.id)
     } catch (error) {
@@ -496,6 +530,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       return await window.mindforest.llmProfiles.test({ id })
     } catch (error) {
       return { ok: false, error: errorMessage(error) }
+    }
+  },
+
+  generateCardTitle: async (cardId) => {
+    if (get().titleGenerating.includes(cardId)) return
+    set((state) => ({ titleGenerating: [...state.titleGenerating, cardId], error: null }))
+    try {
+      const updated = await window.mindforest.cards.generateTitle({ id: cardId })
+      set((state) => ({
+        cards: state.cards.map((card) => (card.id === updated.id ? updated : card))
+      }))
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    } finally {
+      set((state) => ({ titleGenerating: state.titleGenerating.filter((id) => id !== cardId) }))
+    }
+  },
+
+  applyTitleUpdated: (card) => {
+    set((state) => ({
+      cards: state.cards.map((item) => (item.id === card.id ? card : item))
+    }))
+  },
+
+  setTaskPreferences: async (patch) => {
+    const taskPreferences = { ...get().taskPreferences, ...patch }
+    set({ taskPreferences })
+    try {
+      await window.mindforest.settings.set({
+        key: TASK_PREFERENCES_KEY,
+        value: JSON.stringify(taskPreferences)
+      })
+    } catch (error) {
+      set({ error: errorMessage(error) })
     }
   },
 

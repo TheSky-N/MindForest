@@ -10,12 +10,22 @@ import {
   type ReactFlowInstance
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import type { Card, TreeEdgeId } from '@shared/types'
 import { useAppStore, useEffectiveMode } from '../stores/appStore'
-import { buildCardTreeLayout, CARD_NODE_HEIGHT, CARD_NODE_WIDTH } from './tree/layout'
+import { buildCardTreeLayout, resolveNodeSize } from './tree/layout'
 import { CardFlowNode, type CardNodeData } from './tree/CardFlowNode'
+import { CardContextMenu } from './tree/CardContextMenu'
+import { TreeRenameDialog } from './tree/TreeRenameDialog'
 import { CardShell } from './layout/CardShell'
 
 const nodeTypes = { card: CardFlowNode }
+
+const EDGE_TYPES: Record<TreeEdgeId, string> = {
+  bezier: 'default',
+  smoothstep: 'smoothstep',
+  straight: 'straight',
+  step: 'step'
+}
 
 function useCanvasDotColor(): string {
   const themeId = useAppStore((state) => state.preferences.themeId)
@@ -33,10 +43,29 @@ function Flow() {
   const cards = useAppStore((state) => state.cards)
   const activeCardId = useAppStore((state) => state.activeCardId)
   const selectCard = useAppStore((state) => state.selectCard)
+  const treePreferences = useAppStore((state) => state.preferences.tree)
+  const titleGenerating = useAppStore((state) => state.titleGenerating)
+  const createChildCard = useAppStore((state) => state.createChildCard)
+  const createBranchFromCard = useAppStore((state) => state.createBranchFromCard)
+  const renameCard = useAppStore((state) => state.renameCard)
+  const deleteCard = useAppStore((state) => state.deleteCard)
+  const generateCardTitle = useAppStore((state) => state.generateCardTitle)
+
   const [instance, setInstance] = useState<ReactFlowInstance | null>(null)
+  const [menu, setMenu] = useState<{ card: Card; x: number; y: number } | null>(null)
+  const [renaming, setRenaming] = useState<{ card: Card; value: string } | null>(null)
   const dotColor = useCanvasDotColor()
 
-  const layout = useMemo(() => buildCardTreeLayout(cards), [cards])
+  const nodeSize = useMemo(() => resolveNodeSize(treePreferences.aspect), [treePreferences.aspect])
+
+  const layout = useMemo(
+    () =>
+      buildCardTreeLayout(cards, {
+        nodeWidth: nodeSize.width,
+        nodeHeight: nodeSize.height
+      }),
+    [cards, nodeSize]
+  )
 
   const nodes = useMemo<Array<Node<CardNodeData>>>(
     () =>
@@ -47,13 +76,15 @@ function Flow() {
         data: {
           title: node.card.title,
           kind: node.card.kind,
-          active: node.card.id === activeCardId
+          active: node.card.id === activeCardId,
+          shape: treePreferences.shape,
+          generating: titleGenerating.includes(node.card.id)
         },
         draggable: false,
         connectable: false,
-        style: { width: CARD_NODE_WIDTH, height: CARD_NODE_HEIGHT }
+        style: { width: nodeSize.width, height: nodeSize.height }
       })),
-    [layout, activeCardId]
+    [layout, activeCardId, treePreferences.shape, titleGenerating, nodeSize]
   )
 
   const edges = useMemo<Edge[]>(
@@ -62,40 +93,83 @@ function Flow() {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        type: 'smoothstep',
+        type: EDGE_TYPES[treePreferences.edge],
         style:
           edge.kind === 'branch'
             ? { stroke: 'var(--mf-warning)', strokeDasharray: '4 3' }
             : { stroke: 'var(--mf-edge)' }
       })),
-    [layout]
+    [layout, treePreferences.edge]
   )
 
   useEffect(() => {
     if (!instance) return
     instance.fitView({ padding: 0.25, duration: 200 })
-  }, [instance, layout])
+  }, [instance, layout, nodeSize])
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      onInit={setInstance}
-      onNodeClick={(_event, node) => void selectCard(node.id)}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable
-      onlyRenderVisibleElements
-      fitView
-      minZoom={0.2}
-      maxZoom={2}
-      proOptions={{ hideAttribution: true }}
-      className="bg-app"
-    >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color={dotColor} />
-      <Controls showInteractive={false} position="bottom-right" />
-    </ReactFlow>
+    <div className="relative h-full w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onInit={setInstance}
+        onNodeClick={(_event, node) => void selectCard(node.id)}
+        onNodeContextMenu={(event, node) => {
+          event.preventDefault()
+          const card = cards.find((item) => item.id === node.id)
+          if (card) setMenu({ card, x: event.clientX, y: event.clientY })
+        }}
+        onPaneClick={() => setMenu(null)}
+        onMoveStart={() => setMenu(null)}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable
+        onlyRenderVisibleElements
+        fitView
+        minZoom={0.2}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+        className="bg-app"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color={dotColor} />
+        <Controls showInteractive={false} position="bottom-right" />
+      </ReactFlow>
+
+      {menu && (
+        <CardContextMenu
+          card={menu.card}
+          x={menu.x}
+          y={menu.y}
+          generating={titleGenerating.includes(menu.card.id)}
+          onClose={() => setMenu(null)}
+          onCreateChild={(card) => void createChildCard(card.id)}
+          onCreateBranch={(card) => void createBranchFromCard(card.id)}
+          onRename={(card) => setRenaming({ card, value: card.title })}
+          onGenerateTitle={(card) => void generateCardTitle(card.id)}
+          onDelete={(card) => {
+            if (window.confirm(`删除卡片「${card.title}」及其全部子卡片？`)) {
+              void deleteCard(card.id)
+            }
+          }}
+        />
+      )}
+
+      {renaming && (
+        <TreeRenameDialog
+          value={renaming.value}
+          onChange={(value) => setRenaming({ card: renaming.card, value })}
+          onCancel={() => setRenaming(null)}
+          onConfirm={() => {
+            const trimmed = renaming.value.trim()
+            if (trimmed && trimmed !== renaming.card.title) {
+              void renameCard(renaming.card.id, trimmed)
+            }
+            setRenaming(null)
+          }}
+        />
+      )}
+    </div>
   )
 }
 

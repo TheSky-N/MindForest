@@ -25,6 +25,7 @@ export function createProjectRepository(db: AppDatabase) {
           branchFromMessageId: null,
           inheritedContext: null,
           title: input.name,
+          titleGenerated: true,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now

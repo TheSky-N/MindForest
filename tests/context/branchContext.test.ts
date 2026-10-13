@@ -96,6 +96,37 @@ describe('分支上下文装配', () => {
     expect(context.text).toContain('分支问题')
   })
 
+  it('不指定分支点时继承整段对话', () => {
+    const { messages, conversation, rootCard } = setup()
+    const first = messages.appendUser({ conversationId: conversation.id, content: '问题一' })
+    const answerOne = messages.createAssistant({
+      conversationId: conversation.id,
+      turnIndex: first.turnIndex
+    })
+    messages.completeAssistant(answerOne.id, '回答一')
+    const second = messages.appendUser({ conversationId: conversation.id, content: '问题二' })
+    const answerTwo = messages.createAssistant({
+      conversationId: conversation.id,
+      turnIndex: second.turnIndex
+    })
+    messages.completeAssistant(answerTwo.id, '回答二')
+
+    const context = buildBranchContext(handle.db, { sourceCardId: rootCard.id })
+
+    expect(context.fromMessageId).toBeNull()
+    expect(context.inheritedTurnCount).toBe(2)
+    expect(context.text).toContain('问题一')
+    expect(context.text).toContain('回答二')
+  })
+
+  it('没有对话时无法建立分支', () => {
+    const { rootCard } = setup()
+
+    expect(() => buildBranchContext(handle.db, { sourceCardId: rootCard.id })).toThrow(
+      '该卡片还没有对话，无法建立分支'
+    )
+  })
+
   it('分支点消息不属于来源卡片时报错', () => {
     const { rootCard } = setup()
 

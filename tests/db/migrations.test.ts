@@ -23,6 +23,11 @@ describe('数据库迁移', () => {
     )
     expect(sqlite.pragma('foreign_keys', { simple: true })).toBe(1)
 
+    const cardColumns = (
+      sqlite.prepare("pragma table_info('cards')").all() as Array<{ name: string }>
+    ).map((column) => column.name)
+    expect(cardColumns).toContain('title_generated')
+
     sqlite.close()
   })
 })

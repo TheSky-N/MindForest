@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { MindForestApi } from '@shared/api'
-import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent } from '@shared/types'
+import type { Card, ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent } from '@shared/types'
 import { IPC } from '@shared/ipc'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
@@ -31,7 +31,9 @@ const api: MindForestApi = {
     createChild: (input) => ipcRenderer.invoke(IPC.cardsCreateChild, input),
     createBranch: (input) => ipcRenderer.invoke(IPC.cardsCreateBranch, input),
     rename: (input) => ipcRenderer.invoke(IPC.cardsRename, input),
-    delete: (input) => ipcRenderer.invoke(IPC.cardsDelete, input)
+    delete: (input) => ipcRenderer.invoke(IPC.cardsDelete, input),
+    generateTitle: (input) => ipcRenderer.invoke(IPC.cardsGenerateTitle, input),
+    onTitleUpdated: (callback: (card: Card) => void) => subscribe(IPC.cardsTitleUpdated, callback)
   },
   conversations: {
     getByCard: (input) => ipcRenderer.invoke(IPC.conversationsGetByCard, input)

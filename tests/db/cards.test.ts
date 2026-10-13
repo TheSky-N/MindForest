@@ -64,6 +64,20 @@ describe('卡片仓储', () => {
     expect(second.sortOrder).toBe(first.sortOrder + 1)
   })
 
+  it('新卡片未生成标题，重命名后标记为已生成', () => {
+    const projects = createProjectRepository(handle.db)
+    const cards = createCardRepository(handle.db)
+    const { rootCard } = projects.create({ name: 'P' })
+
+    const child = cards.createChild({ parentCardId: rootCard.id })
+    expect(child.titleGenerated).toBe(false)
+    expect(cards.getOrThrow(rootCard.id).titleGenerated).toBe(true)
+
+    const renamed = cards.rename(child.id, '自定义标题')
+    expect(renamed.title).toBe('自定义标题')
+    expect(renamed.titleGenerated).toBe(true)
+  })
+
   it('删除卡片会级联删除后代卡片', () => {
     const projects = createProjectRepository(handle.db)
     const cards = createCardRepository(handle.db)

@@ -50,6 +50,7 @@ export function createCardRepository(db: AppDatabase) {
           branchFromMessageId: null,
           inheritedContext: null,
           title: input.title?.trim() || '新子卡片',
+          titleGenerated: false,
           sortOrder: nextSortOrder(db, parent.projectId, parent.id),
           createdAt: now,
           updatedAt: now
@@ -64,7 +65,7 @@ export function createCardRepository(db: AppDatabase) {
 
     createBranch(input: {
       sourceCardId: string
-      fromMessageId: string
+      fromMessageId: string | null
       inheritedContext: string
       title?: string
     }): Card {
@@ -79,6 +80,7 @@ export function createCardRepository(db: AppDatabase) {
           branchFromMessageId: input.fromMessageId,
           inheritedContext: input.inheritedContext,
           title: input.title?.trim() || '新分支',
+          titleGenerated: false,
           sortOrder: nextSortOrder(db, source.projectId, source.id),
           createdAt: now,
           updatedAt: now
@@ -94,7 +96,20 @@ export function createCardRepository(db: AppDatabase) {
     rename(id: string, title: string): Card {
       const trimmed = title.trim()
       if (!trimmed) throw new Error('卡片标题不能为空')
-      db.update(cards).set({ title: trimmed, updatedAt: new Date() }).where(eq(cards.id, id)).run()
+      db.update(cards)
+        .set({ title: trimmed, titleGenerated: true, updatedAt: new Date() })
+        .where(eq(cards.id, id))
+        .run()
+      return repo.getOrThrow(id)
+    },
+
+    setGeneratedTitle(id: string, title: string): Card {
+      const trimmed = title.trim()
+      if (!trimmed) throw new Error('卡片标题不能为空')
+      db.update(cards)
+        .set({ title: trimmed, titleGenerated: true, updatedAt: new Date() })
+        .where(eq(cards.id, id))
+        .run()
       return repo.getOrThrow(id)
     },
 

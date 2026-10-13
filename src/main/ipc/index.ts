@@ -18,6 +18,8 @@ import { createChatService, type ChatEventSink, type RuntimeProfile } from '../c
 import { editUserMessage } from '../chat/conversationService'
 import { completeChat } from '../llm/client'
 import { refreshCardSummaryIfNeeded } from '../llm/summaryService'
+import { generateCardTitle } from '../llm/titleService'
+import { normalizeTaskPreferences } from '@shared/types'
 
 function safeSend(sender: WebContents, channel: string, payload: unknown): void {
   if (sender.isDestroyed()) return
@@ -37,19 +39,49 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   const scheduleCardSummary = (cardId: string): void => {
     try {
       if (cards.countChildren(cardId) === 0) return
-      const active = profiles.getActiveRow()
-      if (!active) return
-      const apiKey = getApiKey(active.id, active.apiKeyEncrypted) ?? undefined
-      void refreshCardSummaryIfNeeded({
-        db,
-        cardId,
-        profile: {
-          baseUrl: active.baseUrl,
-          model: active.model,
-          temperature: active.temperature,
-          apiKey
-        }
-      }).catch(() => undefined)
+      const profile = resolveTaskProfile()
+      void refreshCardSummaryIfNeeded({ db, cardId, profile }).catch(() => undefined)
+    } catch {
+      void 0
+    }
+  }
+
+  const TASK_PREFERENCES_KEY = 'preferences.tasks'
+
+  function resolveTaskProfile(): RuntimeProfile {
+    let preferredId = ''
+    try {
+      const raw = settings.get(TASK_PREFERENCES_KEY)
+      if (raw) preferredId = normalizeTaskPreferences(JSON.parse(raw)).summaryProfileId
+    } catch {
+      preferredId = ''
+    }
+    const row = (preferredId ? profiles.getRow(preferredId) : undefined) ?? profiles.getActiveRow()
+    if (!row) throw new Error('请先在「模型设置」中配置并启用一个模型')
+    const apiKey = getApiKey(row.id, row.apiKeyEncrypted) ?? undefined
+    return { baseUrl: row.baseUrl, model: row.model, temperature: row.temperature, apiKey }
+  }
+
+  const titleInFlight = new Set<string>()
+
+  const scheduleAutoTitle = (cardId: string, sender: WebContents): void => {
+    try {
+      const card = cards.get(cardId)
+      if (!card || card.titleGenerated || titleInFlight.has(cardId)) return
+      const conversation = conversations.getByCard(cardId)
+      if (!conversation) return
+      const rows = messages.listByConversation(conversation.id)
+      if (!rows.some((message) => message.role === 'assistant' && message.status === 'complete')) {
+        return
+      }
+      const profile = resolveTaskProfile()
+      titleInFlight.add(cardId)
+      void generateCardTitle({ db, cardId, profile })
+        .then((updated) => {
+          if (updated) safeSend(sender, IPC.cardsTitleUpdated, updated)
+        })
+        .catch(() => undefined)
+        .finally(() => titleInFlight.delete(cardId))
     } catch {
       void 0
     }
@@ -76,7 +108,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
 
   const chatEvents = (sender: WebContents): ChatEventSink => ({
     delta: (payload: ChatDeltaEvent) => safeSend(sender, IPC.chatDelta, payload),
-    done: (payload: ChatDoneEvent) => safeSend(sender, IPC.chatDone, payload),
+    done: (payload: ChatDoneEvent) => {
+      safeSend(sender, IPC.chatDone, payload)
+      const conversation = conversations.getById(payload.message.conversationId)
+      if (conversation) scheduleAutoTitle(conversation.cardId, sender)
+    },
     error: (payload: ChatErrorEvent) => safeSend(sender, IPC.chatError, payload)
   })
 
@@ -113,18 +149,28 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   )
   ipcMain.handle(
     IPC.cardsCreateBranch,
-    (_event, input: { sourceCardId: string; fromMessageId: string; title?: string }) => {
+    (_event, input: { sourceCardId: string; fromMessageId?: string | null; title?: string }) => {
       const context = buildBranchContext(db, {
         sourceCardId: input.sourceCardId,
-        fromMessageId: input.fromMessageId
+        fromMessageId: input.fromMessageId ?? null
       })
-      return cards.createBranch({ ...input, inheritedContext: context.text })
+      return cards.createBranch({
+        sourceCardId: input.sourceCardId,
+        fromMessageId: context.fromMessageId,
+        inheritedContext: context.text,
+        title: input.title
+      })
     }
   )
   ipcMain.handle(IPC.cardsRename, (_event, input: { id: string; title: string }) =>
     cards.rename(input.id, input.title)
   )
   ipcMain.handle(IPC.cardsDelete, (_event, input: { id: string }) => cards.delete(input.id))
+  ipcMain.handle(IPC.cardsGenerateTitle, async (_event, input: { id: string }) => {
+    const updated = await generateCardTitle({ db, cardId: input.id, profile: resolveTaskProfile() })
+    if (!updated) throw new Error('该卡片还没有对话，无法总结主题')
+    return updated
+  })
 
   ipcMain.handle(IPC.conversationsGetByCard, (_event, input: { cardId: string }) =>
     conversations.ensureForCard(input.cardId)

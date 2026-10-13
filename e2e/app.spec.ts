@@ -12,8 +12,26 @@ let mockPort: number
 test.beforeAll(async () => {
   server = createServer((request, response) => {
     if (request.url === '/v1/chat/completions') {
-      request.resume()
+      let body = ''
+      request.on('data', (chunk) => {
+        body += chunk
+      })
       request.on('end', () => {
+        let stream: boolean
+        try {
+          stream = JSON.parse(body).stream !== false
+        } catch {
+          stream = true
+        }
+        if (!stream) {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          response.end(
+            JSON.stringify({
+              choices: [{ message: { role: 'assistant', content: 'AI 主题标题' } }]
+            })
+          )
+          return
+        }
         response.writeHead(200, { 'Content-Type': 'text/event-stream' })
         response.write('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n')
         response.end('data: [DONE]\n\n')
@@ -134,6 +152,103 @@ test('主题偏好持久化与面板折叠生效', async () => {
   expect(after.theme).toBe('nord')
   expect(after.bodyBg).toBe('rgb(233, 237, 244)')
   expect(after.sidebarWidth).toBeGreaterThan(100)
+
+  await app.close()
+})
+
+test('卡片树：向下布局、从卡片建分支、自动标题与右键菜单', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-tree-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const seeded = await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const { project, rootCard } = await api.projects.create({ name: '树测试' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const child = await api.cards.createChild({ parentCardId: rootCard.id })
+      const conversation = await api.conversations.getByCard({ cardId: child.id })
+      const donePromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+        const off = api.chat.onDone(() => {
+          off()
+          clearTimeout(timeout)
+          resolve()
+        })
+      })
+      await api.chat.send({ conversationId: conversation.id, content: '父节点问题' })
+      await donePromise
+      return { projectId: project.id, rootCardId: rootCard.id, childId: child.id }
+    },
+    { port: mockPort }
+  )
+
+  await expect
+    .poll(
+      async () =>
+        window.evaluate(
+          async ({ projectId, childId }) => {
+            const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+            const cards = await api.cards.listByProject({ projectId })
+            const child = cards.find((card) => card.id === childId)
+            return child
+              ? { title: child.title, generated: child.titleGenerated }
+              : { title: '', generated: false }
+          },
+          { projectId: seeded.projectId, childId: seeded.childId }
+        ),
+      { timeout: 15000 }
+    )
+    .toEqual({ title: 'AI 主题标题', generated: true })
+
+  const branch = await window.evaluate(async (childId) => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    const card = await api.cards.createBranch({ sourceCardId: childId })
+    return { kind: card.kind, inherited: card.inheritedContext ?? '' }
+  }, seeded.childId)
+  expect(branch.kind).toBe('branch')
+  expect(branch.inherited).toContain('父节点问题')
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  const layoutCheck = await window.evaluate(
+    ({ rootCardId, childId }) => {
+      const rootEl = document.querySelector(`.react-flow__node[data-id="${rootCardId}"]`)
+      const childEl = document.querySelector(`.react-flow__node[data-id="${childId}"]`)
+      if (!rootEl || !childEl) return null
+      return {
+        childBelowRoot:
+          childEl.getBoundingClientRect().top > rootEl.getBoundingClientRect().top
+      }
+    },
+    { rootCardId: seeded.rootCardId, childId: seeded.childId }
+  )
+  expect(layoutCheck?.childBelowRoot).toBe(true)
+
+  const before = await window.evaluate(
+    () => document.querySelectorAll('.react-flow__node').length
+  )
+  await window.locator('.react-flow__node').first().click({ button: 'right' })
+  await window.waitForSelector('text=建立子卡片')
+  const menuItems = await window.locator('div.fixed.z-50 button').count()
+  expect(menuItems).toBe(5)
+  await window.locator('text=建立子卡片').click()
+  await window.waitForTimeout(700)
+  const after = await window.evaluate(
+    () => document.querySelectorAll('.react-flow__node').length
+  )
+  expect(after).toBe(before + 1)
 
   await app.close()
 })

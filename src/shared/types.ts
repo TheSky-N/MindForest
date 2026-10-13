@@ -17,6 +17,7 @@ export interface Card {
   branchFromMessageId: string | null
   inheritedContext: string | null
   title: string
+  titleGenerated: boolean
   sortOrder: number
   createdAt: Date
   updatedAt: Date
@@ -130,16 +131,52 @@ export type ColorMode = 'light' | 'dark' | 'system'
 
 export type ThemeId = 'forest' | 'nord' | 'gruvbox' | 'catppuccin' | 'solarized' | 'github'
 
+export type TreeAspectId = '4:1' | '3:1' | '2:1' | '1:1'
+
+export type TreeShapeId = 'rounded' | 'pill' | 'square'
+
+export type TreeEdgeId = 'bezier' | 'smoothstep' | 'straight' | 'step'
+
+export interface TreeAppearancePreferences {
+  aspect: TreeAspectId
+  shape: TreeShapeId
+  edge: TreeEdgeId
+}
+
 export interface AppPreferences {
   mode: ColorMode
   themeId: ThemeId
   fontUi: string
   fontCode: string
+  tree: TreeAppearancePreferences
+}
+
+export interface TaskPreferences {
+  summaryProfileId: string
+}
+
+export const DEFAULT_TREE_APPEARANCE: TreeAppearancePreferences = {
+  aspect: '3:1',
+  shape: 'rounded',
+  edge: 'bezier'
 }
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   mode: 'dark',
   themeId: 'forest',
   fontUi: '',
-  fontCode: ''
+  fontCode: '',
+  tree: DEFAULT_TREE_APPEARANCE
+}
+
+export const DEFAULT_TASK_PREFERENCES: TaskPreferences = {
+  summaryProfileId: ''
+}
+
+export function normalizeTaskPreferences(value: unknown): TaskPreferences {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_TASK_PREFERENCES }
+  const record = value as Record<string, unknown>
+  return {
+    summaryProfileId: typeof record.summaryProfileId === 'string' ? record.summaryProfileId : ''
+  }
 }

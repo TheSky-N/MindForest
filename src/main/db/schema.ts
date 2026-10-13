@@ -35,6 +35,7 @@ export const cards = sqliteTable(
     branchFromMessageId: text('branch_from_message_id'),
     inheritedContext: text('inherited_context'),
     title: text('title').notNull(),
+    titleGenerated: integer('title_generated', { mode: 'boolean' }).notNull().default(false),
     sortOrder: integer('sort_order').notNull().default(0),
     ...timestamps
   },

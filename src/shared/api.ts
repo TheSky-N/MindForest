@@ -36,11 +36,13 @@ export interface MindForestApi {
     createChild(input: { parentCardId: string; title?: string }): Promise<Card>
     createBranch(input: {
       sourceCardId: string
-      fromMessageId: string
+      fromMessageId?: string | null
       title?: string
     }): Promise<Card>
     rename(input: { id: string; title: string }): Promise<Card>
     delete(input: { id: string }): Promise<void>
+    generateTitle(input: { id: string }): Promise<Card>
+    onTitleUpdated(callback: (card: Card) => void): () => void
   }
   conversations: {
     getByCard(input: { cardId: string }): Promise<Conversation>

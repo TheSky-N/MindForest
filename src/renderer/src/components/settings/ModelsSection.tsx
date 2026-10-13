@@ -22,6 +22,8 @@ export function ModelsSection() {
   const removeProfile = useAppStore((state) => state.removeProfile)
   const setActiveProfile = useAppStore((state) => state.setActiveProfile)
   const testProfile = useAppStore((state) => state.testProfile)
+  const taskPreferences = useAppStore((state) => state.taskPreferences)
+  const setTaskPreferences = useAppStore((state) => state.setTaskPreferences)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<LlmProfileInput>(EMPTY_DRAFT)
@@ -147,6 +149,22 @@ export function ModelsSection() {
             系统密钥环不可用：API Key 只会保留在本次会话中，重启应用后需要重新输入。
           </div>
         )}
+
+        <div className="mb-4 flex items-center gap-2">
+          <span className="shrink-0 text-[11px] text-fg-muted">后台任务模型（AI 标题/摘要）</span>
+          <select
+            value={taskPreferences.summaryProfileId}
+            onChange={(event) => void setTaskPreferences({ summaryProfileId: event.target.value })}
+            className="min-w-0 flex-1 rounded border border-border bg-app px-2 py-1 text-xs outline-none focus:border-accent"
+          >
+            <option value="">跟随当前启用模型</option>
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name} · {profile.model}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1">

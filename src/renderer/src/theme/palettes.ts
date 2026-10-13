@@ -1,5 +1,12 @@
-import type { AppPreferences, ColorMode, ThemeId } from '@shared/types'
-import { DEFAULT_PREFERENCES } from '@shared/types'
+import type {
+  AppPreferences,
+  ColorMode,
+  ThemeId,
+  TreeAspectId,
+  TreeEdgeId,
+  TreeShapeId
+} from '@shared/types'
+import { DEFAULT_PREFERENCES, DEFAULT_TREE_APPEARANCE } from '@shared/types'
 
 export interface ThemePalette {
   id: ThemeId
@@ -104,13 +111,42 @@ export function isColorMode(value: unknown): value is ColorMode {
   return value === 'light' || value === 'dark' || value === 'system'
 }
 
+export const TREE_ASPECTS: TreeAspectId[] = ['4:1', '3:1', '2:1', '1:1']
+export const TREE_SHAPES: TreeShapeId[] = ['rounded', 'pill', 'square']
+export const TREE_EDGES: TreeEdgeId[] = ['bezier', 'smoothstep', 'straight', 'step']
+
+export function isTreeAspect(value: unknown): value is TreeAspectId {
+  return typeof value === 'string' && (TREE_ASPECTS as string[]).includes(value)
+}
+
+export function isTreeShape(value: unknown): value is TreeShapeId {
+  return typeof value === 'string' && (TREE_SHAPES as string[]).includes(value)
+}
+
+export function isTreeEdge(value: unknown): value is TreeEdgeId {
+  return typeof value === 'string' && (TREE_EDGES as string[]).includes(value)
+}
+
 export function normalizePreferences(value: unknown): AppPreferences {
-  if (typeof value !== 'object' || value === null) return { ...DEFAULT_PREFERENCES }
+  if (typeof value !== 'object' || value === null) {
+    return { ...DEFAULT_PREFERENCES, tree: { ...DEFAULT_TREE_APPEARANCE } }
+  }
   const record = value as Record<string, unknown>
+  const treeRecord =
+    typeof record.tree === 'object' && record.tree !== null
+      ? (record.tree as Record<string, unknown>)
+      : {}
   return {
     mode: isColorMode(record.mode) ? record.mode : DEFAULT_PREFERENCES.mode,
     themeId: isThemeId(record.themeId) ? record.themeId : DEFAULT_PREFERENCES.themeId,
     fontUi: typeof record.fontUi === 'string' ? record.fontUi : '',
-    fontCode: typeof record.fontCode === 'string' ? record.fontCode : ''
+    fontCode: typeof record.fontCode === 'string' ? record.fontCode : '',
+    tree: {
+      aspect: isTreeAspect(treeRecord.aspect)
+        ? treeRecord.aspect
+        : DEFAULT_TREE_APPEARANCE.aspect,
+      shape: isTreeShape(treeRecord.shape) ? treeRecord.shape : DEFAULT_TREE_APPEARANCE.shape,
+      edge: isTreeEdge(treeRecord.edge) ? treeRecord.edge : DEFAULT_TREE_APPEARANCE.edge
+    }
   }
 }

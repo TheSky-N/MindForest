@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { GitBranch, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { Virtuoso } from 'react-virtuoso'
 import type { Card, Message, MessageQuote } from '@shared/types'
 import { useAppStore } from '../stores/appStore'
@@ -11,6 +11,10 @@ function CardHeader({ card }: { card: Card }) {
   const renameCard = useAppStore((state) => state.renameCard)
   const deleteCard = useAppStore((state) => state.deleteCard)
   const createChildCard = useAppStore((state) => state.createChildCard)
+  const createBranchFromCard = useAppStore((state) => state.createBranchFromCard)
+  const generateCardTitle = useAppStore((state) => state.generateCardTitle)
+  const generatingTitle = useAppStore((state) => state.titleGenerating.includes(card.id))
+  const messageCount = useAppStore((state) => state.messages.length)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(card.title)
 
@@ -61,6 +65,30 @@ function CardHeader({ card }: { card: Card }) {
       >
         <Plus className="h-3 w-3" />
         子卡片
+      </button>
+      <button
+        type="button"
+        title={messageCount === 0 ? '该卡片还没有对话，无法建立分支' : '从此卡片建立分支卡片'}
+        disabled={messageCount === 0}
+        onClick={() => void createBranchFromCard(card.id)}
+        className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:bg-card-muted hover:text-warning disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <GitBranch className="h-3 w-3" />
+        分支
+      </button>
+      <button
+        type="button"
+        title="AI 总结主题"
+        disabled={generatingTitle || messageCount === 0}
+        onClick={() => void generateCardTitle(card.id)}
+        className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-fg-muted hover:bg-card-muted hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {generatingTitle ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <Sparkles className="h-3 w-3" />
+        )}
+        AI 标题
       </button>
       {card.kind !== 'root' && (
         <button
