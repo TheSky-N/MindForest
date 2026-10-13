@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    'Noto Sans SC',
+    'Microsoft YaHei',
+    sans-serif;
+  overscroll-behavior: none;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

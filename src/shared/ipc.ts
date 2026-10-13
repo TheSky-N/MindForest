@@ -1,0 +1,33 @@
+export const IPC = {
+  appGetInfo: 'app:getInfo',
+  projectsList: 'projects:list',
+  projectsCreate: 'projects:create',
+  projectsRename: 'projects:rename',
+  projectsDelete: 'projects:delete',
+  cardsListByProject: 'cards:listByProject',
+  cardsCreateChild: 'cards:createChild',
+  cardsCreateBranch: 'cards:createBranch',
+  cardsRename: 'cards:rename',
+  cardsDelete: 'cards:delete',
+  conversationsGetByCard: 'conversations:getByCard',
+  messagesList: 'messages:list',
+  messagesAppendUser: 'messages:appendUser',
+  messagesDeleteTurn: 'messages:deleteTurn',
+  messagesEdit: 'messages:edit',
+  messagesSetActiveVariant: 'messages:setActiveVariant',
+  quotesListByConversation: 'quotes:listByConversation',
+  llmProfilesList: 'llmProfiles:list',
+  llmProfilesCreate: 'llmProfiles:create',
+  llmProfilesUpdate: 'llmProfiles:update',
+  llmProfilesRemove: 'llmProfiles:remove',
+  llmProfilesSetActive: 'llmProfiles:setActive',
+  llmProfilesTest: 'llmProfiles:test',
+  chatSend: 'chat:send',
+  chatRegenerate: 'chat:regenerate',
+  chatCancel: 'chat:cancel',
+  chatDelta: 'chat:delta',
+  chatDone: 'chat:done',
+  chatError: 'chat:error'
+} as const
+
+export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -1,0 +1,26 @@
+appId: com.mindforest.app
+productName: MindForest
+npmRebuild: false
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: drizzle
+    to: drizzle
+asarUnpack:
+  - "**/*.node"
+linux:
+  target:
+    - AppImage
+    - rpm
+  category: Utility
+  maintainer: MindForest
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
