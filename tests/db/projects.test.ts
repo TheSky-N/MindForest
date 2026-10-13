@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DatabaseHandle } from '@main/db/client'
-import { createCardRepository } from '@main/db/repositories/cards'
-import { createConversationRepository } from '@main/db/repositories/conversations'
-import { createMessageRepository } from '@main/db/repositories/messages'
+import { createNodeRepository } from '@main/db/repositories/nodes'
 import { createProjectRepository } from '@main/db/repositories/projects'
 import { countRows, createTestDatabase } from '../helpers'
 
@@ -17,45 +15,29 @@ afterEach(() => {
 })
 
 describe('项目仓储', () => {
-  it('创建项目时自动生成中心卡片与对话', () => {
+  it('创建与列出项目', () => {
     const projects = createProjectRepository(handle.db)
-    const cards = createCardRepository(handle.db)
-    const conversations = createConversationRepository(handle.db)
-
-    const { project, rootCard } = projects.create({ name: '学习 Rust' })
-
-    expect(project.name).toBe('学习 Rust')
-    expect(rootCard.kind).toBe('root')
-    expect(rootCard.title).toBe('学习 Rust')
-    expect(rootCard.parentCardId).toBeNull()
-    expect(cards.listByProject(project.id)).toHaveLength(1)
-    expect(conversations.getByCard(rootCard.id)?.cardId).toBe(rootCard.id)
-  })
-
-  it('删除项目会级联清理卡片、对话与消息', () => {
-    const projects = createProjectRepository(handle.db)
-    const conversations = createConversationRepository(handle.db)
-    const messages = createMessageRepository(handle.db)
-
-    const { project, rootCard } = projects.create({ name: '临时项目' })
-    const conversation = conversations.getByCardOrThrow(rootCard.id)
-    messages.appendUser({ conversationId: conversation.id, content: '你好' })
-
-    projects.delete(project.id)
-
-    expect(projects.list()).toHaveLength(0)
-    expect(countRows(handle, 'cards')).toBe(0)
-    expect(countRows(handle, 'conversations')).toBe(0)
-    expect(countRows(handle, 'messages')).toBe(0)
+    const project = projects.create({ name: '学习 Rust' })
+    expect(projects.list().map((item) => item.id)).toEqual([project.id])
   })
 
   it('重命名项目', () => {
     const projects = createProjectRepository(handle.db)
-    const { project } = projects.create({ name: '旧名字' })
+    const project = projects.create({ name: '旧名字' })
+    expect(projects.rename(project.id, '新名字').name).toBe('新名字')
+  })
 
-    const renamed = projects.rename(project.id, '新名字')
+  it('删除项目级联清理节点、主题与摘要', () => {
+    const projects = createProjectRepository(handle.db)
+    const nodes = createNodeRepository(handle.db)
+    const project = projects.create({ name: 'P' })
+    const root = nodes.create({ projectId: project.id, parentId: null, userContent: 'q' })
+    nodes.create({ projectId: project.id, parentId: root.id, userContent: 'a' })
 
-    expect(renamed.name).toBe('新名字')
-    expect(renamed.updatedAt.getTime()).toBeGreaterThanOrEqual(project.updatedAt.getTime())
+    projects.delete(project.id)
+
+    expect(projects.list()).toHaveLength(0)
+    expect(countRows(handle, 'nodes')).toBe(0)
+    expect(countRows(handle, 'topic_clusters')).toBe(0)
   })
 })

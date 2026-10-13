@@ -2,7 +2,13 @@ import { join } from 'node:path'
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { closeDatabase, initDatabase } from './db'
-import { createMessageRepository } from './db/repositories/messages'
+import { createNodeRepository } from './db/repositories/nodes'
+import { createSettingsRepository } from './db/repositories/settings'
+import {
+  migrateLegacyData,
+  needsLegacyMigration,
+  renameLegacyTables
+} from './migration/legacyV1'
 import { registerIpcHandlers } from './ipc'
 
 function createWindow(): void {
@@ -39,7 +45,7 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.mindforest.app')
 
   app.on('browser-window-created', (_, window) => {
@@ -47,8 +53,18 @@ app.whenReady().then(() => {
   })
 
   try {
-    const { db } = initDatabase()
-    createMessageRepository(db).failStaleStreaming()
+    const handle = initDatabase()
+    const { db } = handle
+    createNodeRepository(db).failStaleStreaming()
+
+    if (needsLegacyMigration(db)) {
+      const backupPath = join(app.getPath('userData'), `mindforest.db.bak-${Date.now()}`)
+      await handle.sqlite.backup(backupPath)
+      const report = migrateLegacyData(db, backupPath)
+      renameLegacyTables(handle.sqlite)
+      createSettingsRepository(db).set('migration.v2.report', JSON.stringify(report))
+    }
+
     registerIpcHandlers({ db })
   } catch (error) {
     dialog.showErrorBox(

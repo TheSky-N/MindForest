@@ -1,25 +1,35 @@
 import { app, ipcMain, shell, type WebContents } from 'electron'
 import { dirname } from 'node:path'
 import { IPC } from '@shared/ipc'
-import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, LlmProfile, LlmProfileInput, QuoteInput } from '@shared/types'
+import type {
+  ChatDeltaEvent,
+  ChatDoneEvent,
+  ChatErrorEvent,
+  LlmProfile,
+  LlmProfileInput,
+  MigrationReport,
+  QuoteInput
+} from '@shared/types'
+import { normalizeTaskPreferences } from '@shared/types'
 import type { AppDatabase } from '../db/client'
 import { getDatabasePath } from '../db'
 import { createProjectRepository } from '../db/repositories/projects'
-import { createCardRepository } from '../db/repositories/cards'
-import { createConversationRepository } from '../db/repositories/conversations'
-import { createMessageRepository } from '../db/repositories/messages'
+import { createNodeRepository } from '../db/repositories/nodes'
 import { createLlmProfileRepository } from '../db/repositories/llmProfiles'
 import { createQuoteRepository } from '../db/repositories/quotes'
+import { createClusterRepository } from '../db/repositories/clusters'
 import { createSettingsRepository } from '../db/repositories/settings'
-import { buildBranchContext } from '../context/branchContext'
 import { isSecureStorageAvailable } from '../secureStore'
 import { clearApiKey, getApiKey, hasSessionApiKey, storeApiKey } from '../security/apiKeys'
 import { createChatService, type ChatEventSink, type RuntimeProfile } from '../chat/chatService'
-import { editUserMessage } from '../chat/conversationService'
+import { editNode, purgeNode, restoreNode, softDeleteNode } from '../chat/nodeService'
 import { completeChat } from '../llm/client'
-import { refreshCardSummaryIfNeeded } from '../llm/summaryService'
-import { generateCardTitle } from '../llm/titleService'
-import { normalizeTaskPreferences } from '@shared/types'
+import { refreshChainDigest } from '../llm/chainSummaryService'
+import { generateClusterSummary } from '../llm/clusterSummaryService'
+import { createClusterFromSelection } from '../topics/clusterService'
+
+const MIGRATION_REPORT_KEY = 'migration.v2.report'
+const TASK_PREFERENCES_KEY = 'preferences.tasks'
 
 function safeSend(sender: WebContents, channel: string, payload: unknown): void {
   if (sender.isDestroyed()) return
@@ -29,24 +39,18 @@ function safeSend(sender: WebContents, channel: string, payload: unknown): void 
 export function registerIpcHandlers(options: { db: AppDatabase }): void {
   const { db } = options
   const projects = createProjectRepository(db)
-  const cards = createCardRepository(db)
-  const conversations = createConversationRepository(db)
-  const messages = createMessageRepository(db)
+  const nodes = createNodeRepository(db)
   const profiles = createLlmProfileRepository(db)
   const quotes = createQuoteRepository(db)
+  const clusters = createClusterRepository(db)
   const settings = createSettingsRepository(db)
 
-  const scheduleCardSummary = (cardId: string): void => {
-    try {
-      if (cards.countChildren(cardId) === 0) return
-      const profile = resolveTaskProfile()
-      void refreshCardSummaryIfNeeded({ db, cardId, profile }).catch(() => undefined)
-    } catch {
-      void 0
-    }
-  }
+  const clusterSummarizing = new Set<string>()
 
-  const TASK_PREFERENCES_KEY = 'preferences.tasks'
+  const decorate = (profile: LlmProfile): LlmProfile => ({
+    ...profile,
+    hasApiKey: profile.hasApiKey || hasSessionApiKey(profile.id)
+  })
 
   function resolveTaskProfile(): RuntimeProfile {
     let preferredId = ''
@@ -56,63 +60,50 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     } catch {
       preferredId = ''
     }
-    const row = (preferredId ? profiles.getRow(preferredId) : undefined) ?? profiles.getActiveRow()
+    const row =
+      (preferredId ? profiles.getRow(preferredId) : undefined) ?? profiles.getActiveRow()
     if (!row) throw new Error('请先在「模型设置」中配置并启用一个模型')
     const apiKey = getApiKey(row.id, row.apiKeyEncrypted) ?? undefined
     return { baseUrl: row.baseUrl, model: row.model, temperature: row.temperature, apiKey }
   }
 
-  const titleInFlight = new Set<string>()
+  const digestInFlight = new Set<string>()
 
-  const scheduleAutoTitle = (cardId: string, sender: WebContents): void => {
+  const scheduleChainDigest = (nodeId: string): void => {
     try {
-      const card = cards.get(cardId)
-      if (!card || card.titleGenerated || titleInFlight.has(cardId)) return
-      const conversation = conversations.getByCard(cardId)
-      if (!conversation) return
-      const rows = messages.listByConversation(conversation.id)
-      if (!rows.some((message) => message.role === 'assistant' && message.status === 'complete')) {
-        return
-      }
+      if (digestInFlight.has(nodeId)) return
       const profile = resolveTaskProfile()
-      titleInFlight.add(cardId)
-      void generateCardTitle({ db, cardId, profile })
-        .then((updated) => {
-          if (updated) safeSend(sender, IPC.cardsTitleUpdated, updated)
-        })
+      digestInFlight.add(nodeId)
+      void refreshChainDigest({ db, nodeId, profile })
         .catch(() => undefined)
-        .finally(() => titleInFlight.delete(cardId))
+        .finally(() => digestInFlight.delete(nodeId))
     } catch {
       void 0
     }
   }
 
-  const chatService = createChatService({ db, onTurnSettled: scheduleCardSummary })
-
-  const decorate = (profile: LlmProfile): LlmProfile => ({
-    ...profile,
-    hasApiKey: profile.hasApiKey || hasSessionApiKey(profile.id)
-  })
-
-  const resolveActiveProfile = (): RuntimeProfile => {
-    const active = profiles.getActiveRow()
-    if (!active) throw new Error('请先在「模型设置」中配置并启用一个模型')
-    const apiKey = getApiKey(active.id, active.apiKeyEncrypted) ?? undefined
-    return {
-      baseUrl: active.baseUrl,
-      model: active.model,
-      temperature: active.temperature,
-      apiKey
+  const scheduleClusterSummary = (clusterId: string, sender: WebContents): void => {
+    try {
+      if (clusterSummarizing.has(clusterId)) return
+      const profile = resolveTaskProfile()
+      clusterSummarizing.add(clusterId)
+      void generateClusterSummary({ db, clusterId, profile })
+        .then(() => {
+          const updated = clusters.getWithMembers(clusterId)
+          if (updated) safeSend(sender, IPC.treeClusterUpdated, updated)
+        })
+        .catch(() => undefined)
+        .finally(() => clusterSummarizing.delete(clusterId))
+    } catch {
+      void 0
     }
   }
 
+  const chatService = createChatService({ db, onTurnSettled: scheduleChainDigest })
+
   const chatEvents = (sender: WebContents): ChatEventSink => ({
     delta: (payload: ChatDeltaEvent) => safeSend(sender, IPC.chatDelta, payload),
-    done: (payload: ChatDoneEvent) => {
-      safeSend(sender, IPC.chatDone, payload)
-      const conversation = conversations.getById(payload.message.conversationId)
-      if (conversation) scheduleAutoTitle(conversation.cardId, sender)
-    },
+    done: (payload: ChatDoneEvent) => safeSend(sender, IPC.chatDone, payload),
     error: (payload: ChatErrorEvent) => safeSend(sender, IPC.chatError, payload)
   })
 
@@ -125,6 +116,16 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
 
   ipcMain.handle(IPC.appOpenDataDir, () => shell.openPath(dirname(getDatabasePath())))
 
+  ipcMain.handle(IPC.appMigrationReport, (): MigrationReport | null => {
+    const raw = settings.get(MIGRATION_REPORT_KEY)
+    if (!raw) return null
+    try {
+      return JSON.parse(raw) as MigrationReport
+    } catch {
+      return null
+    }
+  })
+
   ipcMain.handle(IPC.settingsGet, (_event, input: { key: string }) =>
     settings.get(input.key) ?? null
   )
@@ -133,68 +134,93 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   })
 
   ipcMain.handle(IPC.projectsList, () => projects.list())
-  ipcMain.handle(IPC.projectsCreate, (_event, input: { name: string }) =>
-    projects.create({ name: input.name.trim() || '未命名项目' })
-  )
+  ipcMain.handle(IPC.projectsCreate, (_event, input: { name: string }) => ({
+    project: projects.create({ name: input.name.trim() || '未命名项目' }),
+    rootNode: null
+  }))
   ipcMain.handle(IPC.projectsRename, (_event, input: { id: string; name: string }) =>
     projects.rename(input.id, input.name.trim() || '未命名项目')
   )
   ipcMain.handle(IPC.projectsDelete, (_event, input: { id: string }) => projects.delete(input.id))
 
-  ipcMain.handle(IPC.cardsListByProject, (_event, input: { projectId: string }) =>
-    cards.listByProject(input.projectId)
+  ipcMain.handle(IPC.treeListNodes, (_event, input: { projectId: string }) =>
+    nodes.listMetaByProject(input.projectId)
   )
-  ipcMain.handle(IPC.cardsCreateChild, (_event, input: { parentCardId: string; title?: string }) =>
-    cards.createChild(input)
+
+  ipcMain.handle(IPC.treeGetPath, (_event, input: { nodeId: string }) => {
+    const path = nodes.getPath(input.nodeId)
+    const quotesByNode = new Map<string, ReturnType<typeof quotes.listByNode>>()
+    for (const node of path) quotesByNode.set(node.id, quotes.listByNode(node.id))
+    return path.map((node) => ({ ...node, quotes: quotesByNode.get(node.id) ?? [] }))
+  })
+
+  ipcMain.handle(IPC.treeListClusters, (_event, input: { projectId: string }) =>
+    clusters.listWithMembers(input.projectId)
   )
+
   ipcMain.handle(
-    IPC.cardsCreateBranch,
-    (_event, input: { sourceCardId: string; fromMessageId?: string | null; title?: string }) => {
-      const context = buildBranchContext(db, {
-        sourceCardId: input.sourceCardId,
-        fromMessageId: input.fromMessageId ?? null
-      })
-      return cards.createBranch({
-        sourceCardId: input.sourceCardId,
-        fromMessageId: context.fromMessageId,
-        inheritedContext: context.text,
-        title: input.title
-      })
+    IPC.treeCreateCluster,
+    (event, input: { projectId: string; nodeIds: string[]; title?: string }) => {
+      const result = createClusterFromSelection(db, input)
+      scheduleClusterSummary(result.cluster.id, event.sender)
+      return result
     }
   )
-  ipcMain.handle(IPC.cardsRename, (_event, input: { id: string; title: string }) =>
-    cards.rename(input.id, input.title)
+
+  ipcMain.handle(IPC.treeRenameCluster, (_event, input: { id: string; title: string }) =>
+    clusters.rename(input.id, input.title)
   )
-  ipcMain.handle(IPC.cardsDelete, (_event, input: { id: string }) => cards.delete(input.id))
-  ipcMain.handle(IPC.cardsGenerateTitle, async (_event, input: { id: string }) => {
-    const updated = await generateCardTitle({ db, cardId: input.id, profile: resolveTaskProfile() })
-    if (!updated) throw new Error('该卡片还没有对话，无法总结主题')
+
+  ipcMain.handle(IPC.treeSummarizeCluster, async (event, input: { id: string }) => {
+    const updated = await generateClusterSummary({
+      db,
+      clusterId: input.id,
+      profile: resolveTaskProfile()
+    })
+    if (!updated) throw new Error('该主题没有可总结的对话')
+    const withMembers = clusters.getWithMembers(input.id)
+    if (withMembers) safeSend(event.sender, IPC.treeClusterUpdated, withMembers)
     return updated
   })
 
-  ipcMain.handle(IPC.conversationsGetByCard, (_event, input: { cardId: string }) =>
-    conversations.ensureForCard(input.cardId)
-  )
-  ipcMain.handle(IPC.messagesList, (_event, input: { conversationId: string }) =>
-    messages.listByConversation(input.conversationId)
-  )
   ipcMain.handle(
-    IPC.messagesAppendUser,
-    (_event, input: { conversationId: string; content: string }) => messages.appendUser(input)
+    IPC.treeSetClusterCollapsed,
+    (_event, input: { id: string; collapsed: boolean }) => {
+      clusters.setCollapsed(input.id, input.collapsed)
+    }
   )
-  ipcMain.handle(
-    IPC.messagesDeleteTurn,
-    (_event, input: { conversationId: string; turnIndex: number }) =>
-      messages.deleteTurn(input.conversationId, input.turnIndex)
-  )
-  ipcMain.handle(IPC.messagesEdit, (_event, input: { id: string; content: string }) =>
-    editUserMessage(db, { messageId: input.id, content: input.content })
-  )
-  ipcMain.handle(IPC.messagesSetActiveVariant, (_event, input: { id: string }) => {
-    messages.setActiveVariant(input.id)
+
+  ipcMain.handle(IPC.treeDeleteCluster, (_event, input: { id: string }) => {
+    clusters.delete(input.id)
   })
-  ipcMain.handle(IPC.quotesListByConversation, (_event, input: { conversationId: string }) =>
-    quotes.listByConversation(input.conversationId)
+
+  ipcMain.handle(IPC.treeSetMainBranch, (_event, input: { nodeId: string }) =>
+    nodes.setMainBranch(input.nodeId)
+  )
+  ipcMain.handle(IPC.treeSetArchived, (_event, input: { nodeId: string; archived: boolean }) =>
+    nodes.setArchived(input.nodeId, input.archived)
+  )
+  ipcMain.handle(IPC.treeSetCollapsed, (_event, input: { nodeId: string; collapsed: boolean }) =>
+    nodes.setCollapsed(input.nodeId, input.collapsed)
+  )
+
+  ipcMain.handle(IPC.treeDeleteNode, (_event, input: { nodeId: string }) => {
+    softDeleteNode(db, input.nodeId)
+  })
+  ipcMain.handle(IPC.treeRestoreNode, (_event, input: { nodeId: string }) => {
+    restoreNode(db, input.nodeId)
+  })
+  ipcMain.handle(IPC.treePurgeNode, (_event, input: { nodeId: string }) => {
+    purgeNode(db, input.nodeId)
+  })
+  ipcMain.handle(IPC.treeListDeleted, (_event, input: { projectId: string }) =>
+    nodes.listDeleted(input.projectId)
+  )
+
+  ipcMain.handle(
+    IPC.treeEditNode,
+    (_event, input: { nodeId: string; content: string; syncGroup?: boolean }) =>
+      editNode(db, input)
   )
 
   ipcMain.handle(IPC.llmProfilesList, () => profiles.list().map(decorate))
@@ -276,29 +302,31 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     IPC.chatSend,
     async (
       event,
-      input: { conversationId: string; content: string; quotes?: QuoteInput[] }
+      input: {
+        projectId: string
+        parentId: string | null
+        content: string
+        quotes?: QuoteInput[]
+      }
     ) => {
       return chatService.send({
-        conversationId: input.conversationId,
+        projectId: input.projectId,
+        parentId: input.parentId,
         content: input.content,
         quotes: input.quotes,
-        profile: resolveActiveProfile(),
+        profile: resolveTaskProfile(),
         events: chatEvents(event.sender)
       })
     }
   )
 
-  ipcMain.handle(
-    IPC.chatRegenerate,
-    async (event, input: { conversationId: string; turnIndex: number }) => {
-      return chatService.regenerate({
-        conversationId: input.conversationId,
-        turnIndex: input.turnIndex,
-        profile: resolveActiveProfile(),
-        events: chatEvents(event.sender)
-      })
-    }
-  )
+  ipcMain.handle(IPC.chatRegenerate, async (event, input: { nodeId: string }) => {
+    return chatService.regenerate({
+      nodeId: input.nodeId,
+      profile: resolveTaskProfile(),
+      events: chatEvents(event.sender)
+    })
+  })
 
   ipcMain.handle(IPC.chatCancel, (_event, input: { requestId: string }) => {
     chatService.cancel(input.requestId)

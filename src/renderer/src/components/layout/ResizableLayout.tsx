@@ -9,7 +9,7 @@ import {
 import { LAYOUT_STORAGE_KEY, useAppStore } from '../../stores/appStore'
 import { Sidebar } from '../Sidebar'
 import { ChatPanel } from '../ChatPanel'
-import { CardTreePanel } from '../CardTreePanel'
+import { TopicTreePanel } from '../TopicTreePanel'
 
 function readStoredLayout(): Layout | undefined {
   try {
@@ -110,7 +110,7 @@ export function ResizableLayout() {
         defaultSize="25%"
         onResize={(size) => setPanelCollapsed('tree', size.asPercentage <= 0.01)}
       >
-        <CardTreePanel />
+        <TopicTreePanel />
       </Panel>
     </Group>
   )

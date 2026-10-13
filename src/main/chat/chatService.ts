@@ -3,16 +3,15 @@ import type {
   ChatDoneEvent,
   ChatErrorEvent,
   ChatSendResult,
-  Message,
-  QuoteInput
+  QuoteInput,
+  TurnNode
 } from '@shared/types'
 import type { AppDatabase } from '../db/client'
-import { createCardRepository } from '../db/repositories/cards'
-import { createConversationRepository } from '../db/repositories/conversations'
-import { createMessageRepository } from '../db/repositories/messages'
+import { createNodeRepository } from '../db/repositories/nodes'
+import { createProjectRepository } from '../db/repositories/projects'
 import { createQuoteRepository } from '../db/repositories/quotes'
 import { newId } from '../db/ids'
-import { assembleCardContext, type AssembledCardContext } from '../llm/contextAssembler'
+import { assembleNodeContext } from '../llm/contextAssembler'
 import { streamChatCompletion, type StreamChatCompletionFn } from '../llm/client'
 
 export interface RuntimeProfile {
@@ -30,15 +29,15 @@ export interface ChatEventSink {
 
 export interface ChatService {
   send(input: {
-    conversationId: string
+    projectId: string
+    parentId: string | null
     content: string
     quotes?: QuoteInput[]
     profile: RuntimeProfile
     events: ChatEventSink
   }): Promise<ChatSendResult>
   regenerate(input: {
-    conversationId: string
-    turnIndex: number
+    nodeId: string
     profile: RuntimeProfile
     events: ChatEventSink
   }): Promise<ChatSendResult>
@@ -58,39 +57,28 @@ const DELTA_BATCH_MS = 30
 export function createChatService(options: {
   db: AppDatabase
   streamFn?: StreamChatCompletionFn
-  onTurnSettled?: (cardId: string) => void
+  onTurnSettled?: (nodeId: string) => void
 }): ChatService {
   const { db } = options
   const streamFn = options.streamFn ?? streamChatCompletion
   const controllers = new Map<string, AbortController>()
 
-  const notifySettled = (cardId: string) => {
+  const notifySettled = (nodeId: string) => {
     try {
-      options.onTurnSettled?.(cardId)
+      options.onTurnSettled?.(nodeId)
     } catch {
       void 0
     }
   }
 
-  function startAssistantStream(input: {
-    conversationId: string
-    turnIndex: number
+  function startNodeStream(input: {
+    node: TurnNode
     profile: RuntimeProfile
-    context: AssembledCardContext
     events: ChatEventSink
-  }): { requestId: string; assistantMessage: Message } {
-    const messagesRepo = createMessageRepository(db)
-    const conversationsRepo = createConversationRepository(db)
-    const cardsRepo = createCardRepository(db)
-
-    const conversation = conversationsRepo.getById(input.conversationId)
-    if (!conversation) throw new Error('对话不存在')
-
-    const assistantMessage = messagesRepo.createAssistant({
-      conversationId: conversation.id,
-      turnIndex: input.turnIndex,
-      model: input.profile.model
-    })
+  }): string {
+    const nodeRepo = createNodeRepository(db)
+    const projectRepo = createProjectRepository(db)
+    const context = assembleNodeContext(db, input.node.id)
 
     const requestId = newId()
     const controller = new AbortController()
@@ -109,7 +97,7 @@ export function createChatService(options: {
       if (!pending) return
       const delta = pending
       pending = ''
-      events.delta({ requestId, messageId: assistantMessage.id, delta })
+      events.delta({ requestId, nodeId: input.node.id, delta })
     }
 
     void (async () => {
@@ -119,10 +107,7 @@ export function createChatService(options: {
           apiKey: input.profile.apiKey,
           model: input.profile.model,
           temperature: input.profile.temperature,
-          messages: [
-            { role: 'system', content: input.context.system },
-            ...input.context.chatMessages
-          ],
+          messages: [{ role: 'system', content: context.system }, ...context.messages],
           signal: controller.signal,
           onDelta: (delta) => {
             buffer += delta
@@ -133,104 +118,81 @@ export function createChatService(options: {
           }
         })
         flushDeltas()
-        const updated = messagesRepo.completeAssistant(
-          assistantMessage.id,
+        const updated = nodeRepo.completeAssistant(
+          input.node.id,
           content,
           input.profile.model
         )
-        conversationsRepo.touch(conversation.id)
-        cardsRepo.touch(conversation.cardId)
-        events.done({ requestId, message: updated })
-        notifySettled(conversation.cardId)
+        projectRepo.touch(input.node.projectId)
+        events.done({ requestId, node: updated })
       } catch (error) {
         flushDeltas()
         if (controller.signal.aborted || isAbortError(error)) {
-          const updated = messagesRepo.abortAssistant(assistantMessage.id, buffer)
-          events.error({ requestId, message: updated })
+          const updated = nodeRepo.abortAssistant(input.node.id, buffer)
+          events.error({ requestId, node: updated })
         } else {
-          const updated = messagesRepo.failAssistant(
-            assistantMessage.id,
-            errorMessage(error),
-            buffer
-          )
-          events.error({ requestId, message: updated })
+          const updated = nodeRepo.failAssistant(input.node.id, errorMessage(error), buffer)
+          events.error({ requestId, node: updated })
         }
-        conversationsRepo.touch(conversation.id)
-        notifySettled(conversation.cardId)
+        projectRepo.touch(input.node.projectId)
       } finally {
         if (deltaTimer) {
           clearTimeout(deltaTimer)
           deltaTimer = null
         }
         controllers.delete(requestId)
+        notifySettled(input.node.id)
       }
     })()
 
-    return { requestId, assistantMessage }
+    return requestId
   }
 
   return {
     async send(input) {
-      const conversationsRepo = createConversationRepository(db)
-      const messagesRepo = createMessageRepository(db)
-      const quotesRepo = createQuoteRepository(db)
+      const content = input.content.trim()
+      if (!content) throw new Error('消息内容不能为空')
+      const projects = createProjectRepository(db)
+      const project = projects.get(input.projectId)
+      if (!project) throw new Error('项目不存在')
+      const nodeRepo = createNodeRepository(db)
+      if (input.parentId) {
+        const parent = nodeRepo.getOrThrow(input.parentId)
+        if (parent.projectId !== project.id) throw new Error('父节点不属于该项目')
+      }
 
-      const conversation = conversationsRepo.getById(input.conversationId)
-      if (!conversation) throw new Error('对话不存在')
-
-      const userMessage = messagesRepo.appendUser({
-        conversationId: conversation.id,
-        content: input.content
+      const node = nodeRepo.create({
+        projectId: project.id,
+        parentId: input.parentId,
+        userContent: content,
+        model: input.profile.model
       })
       if (input.quotes && input.quotes.length > 0) {
-        quotesRepo.createMany(userMessage.id, input.quotes)
+        createQuoteRepository(db).createMany(node.id, input.quotes)
       }
-
-      const context = assembleCardContext(db, conversation.cardId)
-      const started = startAssistantStream({
-        conversationId: conversation.id,
-        turnIndex: userMessage.turnIndex,
-        profile: input.profile,
-        context,
-        events: input.events
-      })
-
-      return {
-        requestId: started.requestId,
-        userMessage,
-        assistantMessage: started.assistantMessage
-      }
+      projects.touch(project.id)
+      const requestId = startNodeStream({ node, profile: input.profile, events: input.events })
+      return { requestId, node }
     },
 
     async regenerate(input) {
-      const conversationsRepo = createConversationRepository(db)
-      const messagesRepo = createMessageRepository(db)
-
-      const conversation = conversationsRepo.getById(input.conversationId)
-      if (!conversation) throw new Error('对话不存在')
-
-      const userMessage = messagesRepo
-        .listTurnMessages(conversation.id, input.turnIndex)
-        .find((message) => message.role === 'user')
-      if (!userMessage) throw new Error('找不到该轮的用户消息')
-
-      const context = assembleCardContext(db, conversation.cardId, {
-        uptoTurnIndex: input.turnIndex,
-        excludeAssistantTurnIndex: input.turnIndex
-      })
-      const started = startAssistantStream({
-        conversationId: conversation.id,
-        turnIndex: input.turnIndex,
-        profile: input.profile,
-        context,
-        events: input.events
-      })
-
-      return {
-        requestId: started.requestId,
-        userMessage,
-        assistantMessage: started.assistantMessage
+      const nodeRepo = createNodeRepository(db)
+      const source = nodeRepo.getOrThrow(input.nodeId)
+      let groupId = source.turnGroupId
+      if (!groupId) {
+        groupId = newId()
+        nodeRepo.setTurnGroup(source.id, groupId)
       }
+      const node = nodeRepo.create({
+        projectId: source.projectId,
+        parentId: source.parentId,
+        userContent: source.userContent,
+        model: input.profile.model,
+        turnGroupId: groupId,
+        isMainBranch: false
+      })
+      const requestId = startNodeStream({ node, profile: input.profile, events: input.events })
+      return { requestId, node }
     },
 
     cancel(requestId) {

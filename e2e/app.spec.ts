@@ -27,7 +27,7 @@ test.beforeAll(async () => {
           response.writeHead(200, { 'Content-Type': 'application/json' })
           response.end(
             JSON.stringify({
-              choices: [{ message: { role: 'assistant', content: 'AI 主题标题' } }]
+              choices: [{ message: { role: 'assistant', content: '标题：测试主题\n\n摘要：模拟摘要' } }]
             })
           )
           return
@@ -50,52 +50,61 @@ test.afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
-test('完整闭环：建项目、配模型、流式对话并落库', async () => {
+test('完整闭环：首条消息创建根节点，继续创建子节点', async () => {
   const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-'))
   const app = await electron.launch({
     args: ['.', `--user-data-dir=${userDataDir}`]
   })
   const window = await app.firstWindow()
   await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
 
   const result = await window.evaluate(
     async ({ port }) => {
       const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-      const donePromise = new Promise<{ status: string; content: string }>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
-        const off = api.chat.onDone((event) => {
-          off()
-          clearTimeout(timeout)
-          resolve({ status: event.message.status, content: event.message.content })
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve()
+          })
         })
-      })
 
-      const project = await api.projects.create({ name: 'E2E 项目' })
+      const { project } = await api.projects.create({ name: 'E2E 项目' })
       await api.llmProfiles.create({
         name: 'Mock',
         baseUrl: `http://127.0.0.1:${port}/v1`,
         model: 'mock-model'
       })
-      const conversation = await api.conversations.getByCard({ cardId: project.rootCard.id })
-      await api.chat.send({ conversationId: conversation.id, content: '你好' })
-      const done = await donePromise
-      const messages = await api.messages.list({ conversationId: conversation.id })
-      const info = await api.app.getInfo()
+      const firstDone = waitDone()
+      const first = await api.chat.send({ projectId: project.id, parentId: null, content: '你好' })
+      await firstDone
+      const secondDone = waitDone()
+      await api.chat.send({
+        projectId: project.id,
+        parentId: first.node.id,
+        content: '继续'
+      })
+      await secondDone
 
+      const nodes = await api.tree.listNodes({ projectId: project.id })
+      const firstNode = nodes.find((node) => node.id === first.node.id)
       return {
-        dbPath: info.dbPath,
-        doneStatus: done.status,
-        doneContent: done.content,
-        messageCount: messages.length
+        projectId: project.id,
+        firstId: first.node.id,
+        nodeCount: nodes.length,
+        firstParent: firstNode ? firstNode.parentId : 'missing',
+        statuses: nodes.map((node) => node.assistantStatus)
       }
     },
     { port: mockPort }
   )
 
-  expect(result.dbPath).toContain(userDataDir)
-  expect(result.doneStatus).toBe('complete')
-  expect(result.doneContent).toBe('你好')
-  expect(result.messageCount).toBe(2)
+  expect(result.nodeCount).toBe(2)
+  expect(result.firstParent).toBeNull()
+  expect(result.statuses).toEqual(['complete', 'complete'])
 
   await app.close()
 })
@@ -134,7 +143,13 @@ test('主题偏好持久化与面板折叠生效', async () => {
     const api = (window as unknown as { mindforest: MindForestApi }).mindforest
     await api.settings.set({
       key: 'preferences.appearance',
-      value: JSON.stringify({ mode: 'light', themeId: 'nord', fontUi: '', fontCode: '' })
+      value: JSON.stringify({
+        mode: 'light',
+        themeId: 'nord',
+        fontUi: '',
+        fontCode: '',
+        tree: { aspect: '3:1', shape: 'rounded', edge: 'bezier' }
+      })
     })
   })
   await window.reload()
@@ -156,7 +171,7 @@ test('主题偏好持久化与面板折叠生效', async () => {
   await app.close()
 })
 
-test('卡片树：向下布局、从卡片建分支、自动标题与右键菜单', async () => {
+test('主题对话树：簇折叠、主分支、归档与单击双击', async () => {
   const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-tree-'))
   const app = await electron.launch({
     args: ['.', `--user-data-dir=${userDataDir}`]
@@ -168,87 +183,123 @@ test('卡片树：向下布局、从卡片建分支、自动标题与右键菜�
   const seeded = await window.evaluate(
     async ({ port }) => {
       const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-      const { project, rootCard } = await api.projects.create({ name: '树测试' })
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+
+      const { project } = await api.projects.create({ name: '树测试' })
       await api.llmProfiles.create({
         name: 'Mock',
         baseUrl: `http://127.0.0.1:${port}/v1`,
         model: 'mock-model'
       })
-      const child = await api.cards.createChild({ parentCardId: rootCard.id })
-      const conversation = await api.conversations.getByCard({ cardId: child.id })
-      const donePromise = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
-        const off = api.chat.onDone(() => {
-          off()
-          clearTimeout(timeout)
-          resolve()
-        })
+      const ids: string[] = []
+      let parentId: string | null = null
+      for (const content of ['第一问', '第二问', '第三问']) {
+        const done = waitDone()
+        const result = await api.chat.send({ projectId: project.id, parentId, content })
+        await done
+        ids.push(result.node.id)
+        parentId = result.node.id
+      }
+
+      const clusterResult = await api.tree.createCluster({
+        projectId: project.id,
+        nodeIds: [ids[1]!, ids[2]!]
       })
-      await api.chat.send({ conversationId: conversation.id, content: '父节点问题' })
-      await donePromise
-      return { projectId: project.id, rootCardId: rootCard.id, childId: child.id }
+      await api.tree.setMainBranch({ nodeId: ids[1]! })
+      const afterMain = await api.tree.listNodes({ projectId: project.id })
+      return {
+        projectId: project.id,
+        ids,
+        clusterId: clusterResult.cluster.id,
+        addedNodeCount: clusterResult.addedNodeCount,
+        clusterMemberCount: clusterResult.cluster.nodeIds.length,
+        mainFlag: afterMain.find((node) => node.id === ids[1])?.isMainBranch ?? false
+      }
     },
     { port: mockPort }
   )
 
-  await expect
-    .poll(
-      async () =>
-        window.evaluate(
-          async ({ projectId, childId }) => {
-            const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-            const cards = await api.cards.listByProject({ projectId })
-            const child = cards.find((card) => card.id === childId)
-            return child
-              ? { title: child.title, generated: child.titleGenerated }
-              : { title: '', generated: false }
-          },
-          { projectId: seeded.projectId, childId: seeded.childId }
-        ),
-      { timeout: 15000 }
-    )
-    .toEqual({ title: 'AI 主题标题', generated: true })
-
-  const branch = await window.evaluate(async (childId) => {
-    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-    const card = await api.cards.createBranch({ sourceCardId: childId })
-    return { kind: card.kind, inherited: card.inheritedContext ?? '' }
-  }, seeded.childId)
-  expect(branch.kind).toBe('branch')
-  expect(branch.inherited).toContain('父节点问题')
+  expect(seeded.clusterMemberCount).toBe(2)
+  expect(seeded.addedNodeCount).toBe(0)
+  expect(seeded.mainFlag).toBe(true)
 
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
   await window.waitForSelector('.react-flow__node')
-  await window.waitForTimeout(900)
+  await window.waitForTimeout(1000)
 
-  const layoutCheck = await window.evaluate(
-    ({ rootCardId, childId }) => {
-      const rootEl = document.querySelector(`.react-flow__node[data-id="${rootCardId}"]`)
-      const childEl = document.querySelector(`.react-flow__node[data-id="${childId}"]`)
-      if (!rootEl || !childEl) return null
+  const [firstId, secondId, thirdId] = seeded.ids
+  const clusterVNodeId = `cluster:${seeded.clusterId}`
+
+  const collapsed = await window.evaluate(
+    ({ firstId, clusterVNodeId }) => {
+      const first = document.querySelector(`.react-flow__node[data-id="${firstId}"]`)
+      const clusterNode = document.querySelector(`.react-flow__node[data-id="${clusterVNodeId}"]`)
       return {
-        childBelowRoot:
-          childEl.getBoundingClientRect().top > rootEl.getBoundingClientRect().top
+        count: document.querySelectorAll('.react-flow__node:not([data-id$=":box"])').length,
+        hasCluster: Boolean(clusterNode),
+        downward: Boolean(
+          first && clusterNode && clusterNode.getBoundingClientRect().top > first.getBoundingClientRect().top
+        )
       }
     },
-    { rootCardId: seeded.rootCardId, childId: seeded.childId }
+    { firstId: firstId!, clusterVNodeId }
   )
-  expect(layoutCheck?.childBelowRoot).toBe(true)
+  expect(collapsed.count).toBe(2)
+  expect(collapsed.hasCluster).toBe(true)
+  expect(collapsed.downward).toBe(true)
 
-  const before = await window.evaluate(
-    () => document.querySelectorAll('.react-flow__node').length
+  await window.locator(`.react-flow__node[data-id="${firstId}"]`).click()
+  await window.waitForSelector('text=预览中', { timeout: 5000 })
+  await window.locator(`.react-flow__node[data-id="${firstId}"]`).dblclick()
+  await expect(window.locator('text=预览中')).toHaveCount(0, { timeout: 5000 })
+
+  await window.evaluate(async ({ projectId, firstNodeId }) => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    void projectId
+    await api.tree.setArchived({ nodeId: firstNodeId, archived: true })
+  }, { projectId: seeded.projectId, firstNodeId: firstId! })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  const archivedCount = await window.evaluate(
+    () => document.querySelectorAll('.react-flow__node:not([data-id$=":box"])').length
   )
-  await window.locator('.react-flow__node').first().click({ button: 'right' })
-  await window.waitForSelector('text=建立子卡片')
-  const menuItems = await window.locator('div.fixed.z-50 button').count()
-  expect(menuItems).toBe(5)
-  await window.locator('text=建立子卡片').click()
-  await window.waitForTimeout(700)
-  const after = await window.evaluate(
-    () => document.querySelectorAll('.react-flow__node').length
+  expect(archivedCount).toBe(1)
+
+  await window.evaluate(async ({ firstNodeId }) => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    await api.tree.setArchived({ nodeId: firstNodeId, archived: false })
+    await api.tree.setClusterCollapsed({ id: 'placeholder', collapsed: false }).catch(() => undefined)
+  }, { firstNodeId: firstId! })
+  await window.evaluate(async ({ clusterId }) => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    await api.tree.setClusterCollapsed({ id: clusterId, collapsed: false })
+  }, { clusterId: seeded.clusterId })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  const expandedCount = await window.evaluate(
+    () => document.querySelectorAll('.react-flow__node:not([data-id$=":box"])').length
   )
-  expect(after).toBe(before + 1)
+  expect(expandedCount).toBe(3)
+  void secondId
+  void thirdId
+
+  await window.locator(`.react-flow__node[data-id="${firstId}"]`).click({ button: 'right' })
+  await window.waitForSelector('text=进入并继续', { timeout: 5000 })
+  await window.keyboard.press('Escape')
+  await expect(window.locator('text=归档节点')).toHaveCount(0, { timeout: 5000 })
 
   await app.close()
 })

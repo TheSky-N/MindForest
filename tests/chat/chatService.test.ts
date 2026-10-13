@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseHandle } from '@main/db/client'
 import { createChatService } from '@main/chat/chatService'
 import type { StreamChatCompletionFn } from '@main/llm/client'
-import { createConversationRepository } from '@main/db/repositories/conversations'
-import { createMessageRepository } from '@main/db/repositories/messages'
+import { createNodeRepository } from '@main/db/repositories/nodes'
 import { createProjectRepository } from '@main/db/repositories/projects'
-import { createQuoteRepository } from '@main/db/repositories/quotes'
 import { createTestDatabase } from '../helpers'
 import type { ChatDoneEvent, ChatErrorEvent } from '@shared/types'
 
@@ -30,159 +28,137 @@ const profile = {
 
 const noopEvents = { delta: () => {}, done: () => {}, error: () => {} }
 
-function setup(streamFn: StreamChatCompletionFn, onTurnSettled?: (cardId: string) => void) {
+function setup(streamFn: StreamChatCompletionFn, onTurnSettled?: (nodeId: string) => void) {
   const projects = createProjectRepository(handle.db)
-  const conversations = createConversationRepository(handle.db)
-  const messages = createMessageRepository(handle.db)
-  const quotes = createQuoteRepository(handle.db)
-  const { rootCard } = projects.create({ name: 'P' })
-  const conversation = conversations.getByCardOrThrow(rootCard.id)
+  const nodes = createNodeRepository(handle.db)
+  const project = projects.create({ name: 'P' })
   const service = createChatService({ db: handle.db, streamFn, onTurnSettled })
-  return { service, conversation, messages, quotes, rootCard }
+  return { projects, nodes, project, service }
 }
 
-describe('聊天服务', () => {
-  it('流式生成后落库为 complete，并触发增量与完成事件', async () => {
-    const deltas: string[] = []
-    let done!: ChatDoneEvent
+describe('对话服务（节点模型）', () => {
+  it('首条消息创建根节点并流式落库', async () => {
     const streamFn: StreamChatCompletionFn = async (options) => {
-      options.onDelta?.('你好')
-      options.onDelta?.('世界')
-      return '你好世界'
+      options.onDelta?.('你')
+      options.onDelta?.('好')
+      return '你好'
     }
-    const { service, conversation, messages } = setup(streamFn)
+    const { service, nodes, project } = setup(streamFn)
 
     const result = await service.send({
-      conversationId: conversation.id,
+      projectId: project.id,
+      parentId: null,
       content: '打个招呼',
-      profile,
-      events: {
-        delta: (event) => deltas.push(event.delta),
-        done: (event) => {
-          done = event
-        },
-        error: () => {
-          throw new Error('不应触发 error 事件')
-        }
-      }
-    })
-
-    expect(result.userMessage.turnIndex).toBe(1)
-    expect(result.assistantMessage.status).toBe('streaming')
-
-    await flush()
-
-    expect(deltas.join('')).toBe('你好世界')
-    expect(done.message.status).toBe('complete')
-    const stored = messages.getOrThrow(result.assistantMessage.id)
-    expect(stored.status).toBe('complete')
-    expect(stored.content).toBe('你好世界')
-    expect(stored.model).toBe('test-model')
-  })
-
-  it('发送时持久化引用并注入上下文', async () => {
-    let captured: Array<{ role: string; content: string }> = []
-    const streamFn: StreamChatCompletionFn = async (options) => {
-      captured = options.messages.map((message) => ({
-        role: message.role,
-        content: message.content
-      }))
-      return '好的'
-    }
-    const { service, conversation, quotes } = setup(streamFn)
-
-    await service.send({
-      conversationId: conversation.id,
-      content: '请解释这段',
-      quotes: [{ quotedMessageId: 'some-message', quoteText: '被引用的内容' }],
       profile,
       events: noopEvents
     })
+
+    expect(result.node.parentId).toBeNull()
+    expect(result.node.isMainBranch).toBe(true)
+    expect(result.node.assistantStatus).toBe('streaming')
+
     await flush()
 
-    const storedQuotes = quotes.listByConversation(conversation.id)
-    expect(storedQuotes).toHaveLength(1)
-    expect(storedQuotes[0]?.quoteText).toBe('被引用的内容')
-
-    const userMessage = captured.find(
-      (message) => message.role === 'user' && message.content.includes('请解释这段')
-    )
-    expect(userMessage?.content).toContain('被引用的内容')
+    const stored = nodes.getOrThrow(result.node.id)
+    expect(stored.assistantStatus).toBe('complete')
+    expect(stored.assistantContent).toBe('你好')
   })
 
-  it('重新生成新增激活变体，上下文排除该轮旧回答与后续轮次', async () => {
-    const contexts: Array<Array<{ role: string; content: string }>> = []
-    let call = 0
-    const streamFn: StreamChatCompletionFn = async (options) => {
-      contexts.push(
-        options.messages.map((message) => ({ role: message.role, content: message.content }))
-      )
-      call += 1
-      return `回答${call}`
-    }
-    const { service, conversation, messages } = setup(streamFn)
+  it('从指定节点继续会创建子节点', async () => {
+    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const { service, nodes, project } = setup(streamFn)
 
     const first = await service.send({
-      conversationId: conversation.id,
-      content: '第一个问题',
+      projectId: project.id,
+      parentId: null,
+      content: '第一问',
       profile,
       events: noopEvents
     })
     await flush()
     const second = await service.send({
-      conversationId: conversation.id,
-      content: '第二个问题',
+      projectId: project.id,
+      parentId: first.node.id,
+      content: '第二问',
       profile,
       events: noopEvents
     })
     await flush()
 
-    const regenerated = await service.regenerate({
-      conversationId: conversation.id,
-      turnIndex: 1,
-      profile,
-      events: noopEvents
-    })
-    await flush()
-
-    expect(messages.getOrThrow(first.assistantMessage.id).isActiveVariant).toBe(false)
-    expect(messages.getOrThrow(second.assistantMessage.id).isActiveVariant).toBe(true)
-    expect(messages.getOrThrow(regenerated.assistantMessage.id).isActiveVariant).toBe(true)
-    expect(messages.listVariants(conversation.id, 1)).toHaveLength(2)
-
-    const regeneratedContext = contexts[contexts.length - 1] ?? []
-    const userContents = regeneratedContext
-      .filter((message) => message.role === 'user')
-      .map((message) => message.content)
-    expect(userContents).toEqual(['第一个问题'])
+    expect(nodes.getPath(second.node.id).map((node) => node.id)).toEqual([
+      first.node.id,
+      second.node.id
+    ])
   })
 
-  it('流结束后通知 onTurnSettled 以触发摘要刷新', async () => {
-    const settled = vi.fn()
+  it('重新生成会创建同组平行节点', async () => {
     const streamFn: StreamChatCompletionFn = async () => '回答'
-    const { service, conversation, rootCard } = setup(streamFn, settled)
+    const { service, nodes, project } = setup(streamFn)
 
-    await service.send({
-      conversationId: conversation.id,
+    const first = await service.send({
+      projectId: project.id,
+      parentId: null,
       content: '问题',
       profile,
       events: noopEvents
     })
     await flush()
 
-    expect(settled).toHaveBeenCalledWith(rootCard.id)
+    const regenerated = await service.regenerate({
+      nodeId: first.node.id,
+      profile,
+      events: noopEvents
+    })
+    await flush()
+
+    const source = nodes.getOrThrow(first.node.id)
+    const sibling = nodes.getOrThrow(regenerated.node.id)
+    expect(sibling.parentId).toBe(source.parentId)
+    expect(sibling.userContent).toBe(source.userContent)
+    expect(sibling.turnGroupId).toBeTruthy()
+    expect(sibling.turnGroupId).toBe(source.turnGroupId)
+    expect(source.isMainBranch).toBe(true)
+    expect(sibling.isMainBranch).toBe(false)
+    expect(nodes.getTurnGroup(source.turnGroupId!)).toHaveLength(2)
   })
 
-  it('流式失败时状态为 error 并保留已生成内容', async () => {
+  it('取消后保留部分内容并标记 aborted', async () => {
+    const streamFn: StreamChatCompletionFn = (options) =>
+      new Promise((_resolve, reject) => {
+        options.onDelta?.('已生成一半')
+        options.signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+        })
+      })
+    const { service, nodes, project } = setup(streamFn)
+
+    const result = await service.send({
+      projectId: project.id,
+      parentId: null,
+      content: '问题',
+      profile,
+      events: noopEvents
+    })
+    await flush()
+    service.cancel(result.requestId)
+    await flush()
+
+    const stored = nodes.getOrThrow(result.node.id)
+    expect(stored.assistantStatus).toBe('aborted')
+    expect(stored.assistantContent).toBe('已生成一半')
+  })
+
+  it('流式失败时状态为 error 并保留部分内容', async () => {
     let errorEvent!: ChatErrorEvent
     const streamFn: StreamChatCompletionFn = async (options) => {
       options.onDelta?.('部分内容')
       throw new Error('网络中断')
     }
-    const { service, conversation, messages } = setup(streamFn)
+    const { service, nodes, project } = setup(streamFn)
 
     const result = await service.send({
-      conversationId: conversation.id,
+      projectId: project.id,
+      parentId: null,
       content: '问题',
       profile,
       events: {
@@ -192,48 +168,66 @@ describe('聊天服务', () => {
         }
       }
     })
-
     await flush()
 
-    expect(errorEvent.message.status).toBe('error')
-    const stored = messages.getOrThrow(result.assistantMessage.id)
-    expect(stored.status).toBe('error')
-    expect(stored.content).toBe('部分内容')
-    expect(stored.errorMessage).toBe('网络中断')
+    expect(errorEvent.node.assistantStatus).toBe('error')
+    const stored = nodes.getOrThrow(result.node.id)
+    expect(stored.assistantError).toBe('网络中断')
+    expect(stored.assistantContent).toBe('部分内容')
   })
 
-  it('取消生成后状态为 aborted 并保留部分内容', async () => {
-    const streamFn: StreamChatCompletionFn = (options) =>
-      new Promise((_resolve, reject) => {
-        options.onDelta?.('已生成一半')
-        options.signal?.addEventListener('abort', () => {
-          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
-        })
-      })
-    const { service, conversation, messages } = setup(streamFn)
+  it('流结束通知 onTurnSettled 以触发链摘要', async () => {
+    const settled = vi.fn()
+    let done!: ChatDoneEvent
+    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const { service, project } = setup(streamFn, settled)
 
     const result = await service.send({
-      conversationId: conversation.id,
+      projectId: project.id,
+      parentId: null,
       content: '问题',
       profile,
-      events: noopEvents
+      events: {
+        ...noopEvents,
+        done: (event) => {
+          done = event
+        }
+      }
     })
-
-    await flush()
-    service.cancel(result.requestId)
     await flush()
 
-    const stored = messages.getOrThrow(result.assistantMessage.id)
-    expect(stored.status).toBe('aborted')
-    expect(stored.content).toBe('已生成一半')
+    expect(done.node.assistantStatus).toBe('complete')
+    expect(settled).toHaveBeenCalledWith(result.node.id)
   })
 
-  it('对话不存在时抛出错误', async () => {
-    const streamFn: StreamChatCompletionFn = async () => 'x'
-    const { service } = setup(streamFn)
+  it('父节点不属于该项目时抛出错误', async () => {
+    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const { service, project } = setup(streamFn)
+    const other = createProjectRepository(handle.db).create({ name: 'Q' })
 
     await expect(
-      service.send({ conversationId: 'missing', content: '你好', profile, events: noopEvents })
-    ).rejects.toThrow('对话不存在')
+      service.send({
+        projectId: other.id,
+        parentId: null,
+        content: 'x',
+        profile,
+        events: noopEvents
+      })
+    ).resolves.toBeTruthy()
+
+    const foreign = createNodeRepository(handle.db).create({
+      projectId: project.id,
+      parentId: null,
+      userContent: 'foreign'
+    })
+    await expect(
+      service.send({
+        projectId: other.id,
+        parentId: foreign.id,
+        content: 'x',
+        profile,
+        events: noopEvents
+      })
+    ).rejects.toThrow('父节点不属于该项目')
   })
 })

@@ -1,43 +1,21 @@
 import { desc, eq } from 'drizzle-orm'
-import type { Card, Project } from '@shared/types'
+import type { Project } from '@shared/types'
 import type { AppDatabase } from '../client'
-import { cards, conversations, projects } from '../schema'
+import { projects } from '../schema'
 import { newId } from '../ids'
 
 export function createProjectRepository(db: AppDatabase) {
   return {
-    create(input: { name: string }): { project: Project; rootCard: Card } {
-      return db.transaction((tx) => {
-        const now = new Date()
-        const project: Project = {
-          id: newId(),
-          name: input.name,
-          createdAt: now,
-          updatedAt: now
-        }
-        tx.insert(projects).values(project).run()
-
-        const rootCard: Card = {
-          id: newId(),
-          projectId: project.id,
-          parentCardId: null,
-          kind: 'root',
-          branchFromMessageId: null,
-          inheritedContext: null,
-          title: input.name,
-          titleGenerated: true,
-          sortOrder: 0,
-          createdAt: now,
-          updatedAt: now
-        }
-        tx.insert(cards).values(rootCard).run()
-
-        tx.insert(conversations)
-          .values({ id: newId(), cardId: rootCard.id, title: null, createdAt: now, updatedAt: now })
-          .run()
-
-        return { project, rootCard }
-      })
+    create(input: { name: string }): Project {
+      const now = new Date()
+      const project: Project = {
+        id: newId(),
+        name: input.name,
+        createdAt: now,
+        updatedAt: now
+      }
+      db.insert(projects).values(project).run()
+      return project
     },
 
     list(): Project[] {
@@ -53,6 +31,10 @@ export function createProjectRepository(db: AppDatabase) {
       const project = this.get(id)
       if (!project) throw new Error('项目不存在')
       return project
+    },
+
+    touch(id: string): void {
+      db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, id)).run()
     },
 
     delete(id: string): void {

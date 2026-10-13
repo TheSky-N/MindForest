@@ -1,55 +1,57 @@
-import { asc, eq } from 'drizzle-orm'
-import type { MessageQuote, QuoteInput } from '@shared/types'
+import { asc, eq, inArray } from 'drizzle-orm'
+import type { NodeQuote, QuoteInput } from '@shared/types'
 import type { AppDatabase } from '../client'
-import { messageQuotes, messages } from '../schema'
+import { nodeQuotes } from '../schema'
 import { newId } from '../ids'
 
-export const MAX_QUOTES_PER_MESSAGE = 5
+export const MAX_QUOTES_PER_NODE = 5
 export const MAX_QUOTE_LENGTH = 2000
 
 export function createQuoteRepository(db: AppDatabase) {
   return {
-    createMany(messageId: string, quotes: QuoteInput[]): MessageQuote[] {
+    createMany(nodeId: string, quotes: QuoteInput[]): NodeQuote[] {
       const cleaned = quotes
         .map((quote) => ({
-          quotedMessageId: quote.quotedMessageId,
+          quotedNodeId: quote.quotedNodeId,
           quoteText: quote.quoteText.trim().slice(0, MAX_QUOTE_LENGTH)
         }))
         .filter((quote) => quote.quoteText.length > 0)
-        .slice(0, MAX_QUOTES_PER_MESSAGE)
+        .slice(0, MAX_QUOTES_PER_NODE)
       if (cleaned.length === 0) return []
 
       const now = new Date()
       return db.transaction((tx) =>
         cleaned.map((quote) => {
-          const row: MessageQuote = {
+          const row: NodeQuote = {
             id: newId(),
-            messageId,
-            quotedMessageId: quote.quotedMessageId,
+            nodeId,
+            quotedNodeId: quote.quotedNodeId,
             quoteText: quote.quoteText,
             createdAt: now,
             updatedAt: now
           }
-          tx.insert(messageQuotes).values(row).run()
+          tx.insert(nodeQuotes).values(row).run()
           return row
         })
       )
     },
 
-    listByConversation(conversationId: string): MessageQuote[] {
+    listByNodes(nodeIds: string[]): NodeQuote[] {
+      if (nodeIds.length === 0) return []
       return db
-        .select({
-          id: messageQuotes.id,
-          messageId: messageQuotes.messageId,
-          quotedMessageId: messageQuotes.quotedMessageId,
-          quoteText: messageQuotes.quoteText,
-          createdAt: messageQuotes.createdAt,
-          updatedAt: messageQuotes.updatedAt
-        })
-        .from(messageQuotes)
-        .innerJoin(messages, eq(messageQuotes.messageId, messages.id))
-        .where(eq(messages.conversationId, conversationId))
-        .orderBy(asc(messageQuotes.createdAt))
+        .select()
+        .from(nodeQuotes)
+        .where(inArray(nodeQuotes.nodeId, nodeIds))
+        .orderBy(asc(nodeQuotes.createdAt))
+        .all()
+    },
+
+    listByNode(nodeId: string): NodeQuote[] {
+      return db
+        .select()
+        .from(nodeQuotes)
+        .where(eq(nodeQuotes.nodeId, nodeId))
+        .orderBy(asc(nodeQuotes.createdAt))
         .all()
     }
   }

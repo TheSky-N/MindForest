@@ -1,25 +1,28 @@
 import type {
   AppInfo,
-  Card,
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
   ChatSendResult,
-  Conversation,
-  EditMessageResult,
+  ClusterWithMembers,
+  DeletedNodeInfo,
   LlmProfile,
   LlmProfileInput,
   LlmProfileTestResult,
-  Message,
-  MessageQuote,
+  MigrationReport,
+  NodeMeta,
+  NodePathEntry,
   Project,
-  QuoteInput
+  QuoteInput,
+  TopicCluster,
+  TurnNode
 } from './types'
 
 export interface MindForestApi {
   app: {
     getInfo(): Promise<AppInfo>
     openDataDir(): Promise<void>
+    migrationReport(): Promise<MigrationReport | null>
   }
   settings: {
     get(input: { key: string }): Promise<string | null>
@@ -27,35 +30,36 @@ export interface MindForestApi {
   }
   projects: {
     list(): Promise<Project[]>
-    create(input: { name: string }): Promise<{ project: Project; rootCard: Card }>
+    create(input: { name: string }): Promise<{ project: Project; rootNode: TurnNode | null }>
     rename(input: { id: string; name: string }): Promise<Project>
     delete(input: { id: string }): Promise<void>
   }
-  cards: {
-    listByProject(input: { projectId: string }): Promise<Card[]>
-    createChild(input: { parentCardId: string; title?: string }): Promise<Card>
-    createBranch(input: {
-      sourceCardId: string
-      fromMessageId?: string | null
+  tree: {
+    listNodes(input: { projectId: string }): Promise<NodeMeta[]>
+    getPath(input: { nodeId: string }): Promise<NodePathEntry[]>
+    listClusters(input: { projectId: string }): Promise<ClusterWithMembers[]>
+    createCluster(input: {
+      projectId: string
+      nodeIds: string[]
       title?: string
-    }): Promise<Card>
-    rename(input: { id: string; title: string }): Promise<Card>
-    delete(input: { id: string }): Promise<void>
-    generateTitle(input: { id: string }): Promise<Card>
-    onTitleUpdated(callback: (card: Card) => void): () => void
-  }
-  conversations: {
-    getByCard(input: { cardId: string }): Promise<Conversation>
-  }
-  messages: {
-    list(input: { conversationId: string }): Promise<Message[]>
-    appendUser(input: { conversationId: string; content: string }): Promise<Message>
-    deleteTurn(input: { conversationId: string; turnIndex: number }): Promise<void>
-    edit(input: { id: string; content: string }): Promise<EditMessageResult>
-    setActiveVariant(input: { id: string }): Promise<void>
-  }
-  quotes: {
-    listByConversation(input: { conversationId: string }): Promise<MessageQuote[]>
+    }): Promise<{ cluster: ClusterWithMembers; addedNodeCount: number }>
+    renameCluster(input: { id: string; title: string }): Promise<TopicCluster>
+    summarizeCluster(input: { id: string }): Promise<TopicCluster>
+    setClusterCollapsed(input: { id: string; collapsed: boolean }): Promise<void>
+    deleteCluster(input: { id: string }): Promise<void>
+    setMainBranch(input: { nodeId: string }): Promise<TurnNode>
+    setArchived(input: { nodeId: string; archived: boolean }): Promise<TurnNode>
+    setCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
+    deleteNode(input: { nodeId: string }): Promise<void>
+    restoreNode(input: { nodeId: string }): Promise<void>
+    purgeNode(input: { nodeId: string }): Promise<void>
+    listDeleted(input: { projectId: string }): Promise<DeletedNodeInfo[]>
+    editNode(input: {
+      nodeId: string
+      content: string
+      syncGroup?: boolean
+    }): Promise<TurnNode>
+    onClusterUpdated(callback: (cluster: ClusterWithMembers) => void): () => void
   }
   llmProfiles: {
     list(): Promise<LlmProfile[]>
@@ -67,11 +71,12 @@ export interface MindForestApi {
   }
   chat: {
     send(input: {
-      conversationId: string
+      projectId: string
+      parentId: string | null
       content: string
       quotes?: QuoteInput[]
     }): Promise<ChatSendResult>
-    regenerate(input: { conversationId: string; turnIndex: number }): Promise<ChatSendResult>
+    regenerate(input: { nodeId: string }): Promise<ChatSendResult>
     cancel(input: { requestId: string }): Promise<void>
     onDelta(callback: (event: ChatDeltaEvent) => void): () => void
     onDone(callback: (event: ChatDoneEvent) => void): () => void

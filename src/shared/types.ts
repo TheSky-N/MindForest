@@ -1,7 +1,3 @@
-export type CardKind = 'root' | 'child' | 'branch'
-export type MessageRole = 'user' | 'assistant'
-export type MessageStatus = 'streaming' | 'complete' | 'aborted' | 'error'
-
 export interface Project {
   id: string
   name: string
@@ -9,48 +5,110 @@ export interface Project {
   updatedAt: Date
 }
 
-export interface Card {
+export type NodeStatus = 'streaming' | 'complete' | 'aborted' | 'error'
+
+export interface TurnNode {
   id: string
   projectId: string
-  parentCardId: string | null
-  kind: CardKind
-  branchFromMessageId: string | null
-  inheritedContext: string | null
+  parentId: string | null
+  userContent: string
+  assistantContent: string
+  assistantStatus: NodeStatus
+  assistantError: string | null
+  model: string | null
+  turnGroupId: string | null
+  sortOrder: number
+  isMainBranch: boolean
+  isArchived: boolean
+  isCollapsed: boolean
+  deletedAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface NodeMeta {
+  id: string
+  projectId: string
+  parentId: string | null
+  userContent: string
+  assistantStatus: NodeStatus
+  assistantError: string | null
+  model: string | null
+  turnGroupId: string | null
+  sortOrder: number
+  isMainBranch: boolean
+  isArchived: boolean
+  isCollapsed: boolean
+  deletedAt: Date | null
+}
+
+export interface NodeQuote {
+  id: string
+  nodeId: string
+  quotedNodeId: string | null
+  quoteText: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface NodePathEntry extends TurnNode {
+  quotes: NodeQuote[]
+}
+
+export interface QuoteInput {
+  quotedNodeId: string | null
+  quoteText: string
+}
+
+export interface TopicCluster {
+  id: string
+  projectId: string
   title: string
   titleGenerated: boolean
-  sortOrder: number
+  summary: string | null
+  color: string | null
+  isCollapsed: boolean
   createdAt: Date
   updatedAt: Date
 }
 
-export interface Conversation {
-  id: string
-  cardId: string
-  title: string | null
-  createdAt: Date
-  updatedAt: Date
+export interface ClusterWithMembers extends TopicCluster {
+  nodeIds: string[]
 }
 
-export interface Message {
-  id: string
-  conversationId: string
-  turnIndex: number
-  role: MessageRole
-  content: string
-  status: MessageStatus
-  model: string | null
-  errorMessage: string | null
-  isActiveVariant: boolean
-  createdAt: Date
-  updatedAt: Date
+export interface DeletedNodeInfo {
+  node: TurnNode
+  descendantCount: number
 }
 
-export interface CardSummary {
-  cardId: string
-  summarizedMessageCount: number
-  summarizedTokenCount: number
-  summary: string
-  updatedAt: Date
+export interface MigrationReport {
+  migratedAt: string
+  projects: number
+  cards: number
+  nodes: number
+  clusters: number
+  backupPath: string | null
+}
+
+export interface ChatDeltaEvent {
+  requestId: string
+  nodeId: string
+  delta: string
+}
+
+export interface ChatDoneEvent {
+  requestId: string
+  node: TurnNode
+}
+
+export interface ChatErrorEvent {
+  requestId: string
+  node: TurnNode
+}
+
+export interface ChatSendResult {
+  requestId: string
+  node: TurnNode
 }
 
 export interface LlmProfile {
@@ -63,13 +121,6 @@ export interface LlmProfile {
   isActive: boolean
   createdAt: Date
   updatedAt: Date
-}
-
-export interface AppInfo {
-  version: string
-  platform: string
-  dbPath: string
-  secureStorageAvailable: boolean
 }
 
 export interface LlmProfileInput {
@@ -86,45 +137,11 @@ export interface LlmProfileTestResult {
   error?: string
 }
 
-export interface ChatDeltaEvent {
-  requestId: string
-  messageId: string
-  delta: string
-}
-
-export interface ChatDoneEvent {
-  requestId: string
-  message: Message
-}
-
-export interface ChatErrorEvent {
-  requestId: string
-  message: Message
-}
-
-export interface ChatSendResult {
-  requestId: string
-  userMessage: Message
-  assistantMessage: Message
-}
-
-export interface MessageQuote {
-  id: string
-  messageId: string
-  quotedMessageId: string | null
-  quoteText: string
-  createdAt: Date
-  updatedAt: Date
-}
-
-export interface QuoteInput {
-  quotedMessageId: string | null
-  quoteText: string
-}
-
-export interface EditMessageResult {
-  message: Message
-  branchWarning: string | null
+export interface AppInfo {
+  version: string
+  platform: string
+  dbPath: string
+  secureStorageAvailable: boolean
 }
 
 export type ColorMode = 'light' | 'dark' | 'system'

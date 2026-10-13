@@ -183,7 +183,7 @@ export function AppearanceSection() {
       </section>
 
       <section>
-        <h3 className="mb-2 text-xs font-medium text-fg">卡片树</h3>
+        <h3 className="mb-2 text-xs font-medium text-fg">主题对话树</h3>
         <div className="grid grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] text-fg-muted">节点比例</span>

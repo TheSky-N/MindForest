@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { MindForestApi } from '@shared/api'
-import type { Card, ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent } from '@shared/types'
+import type {
+  ChatDeltaEvent,
+  ChatDoneEvent,
+  ChatErrorEvent,
+  ClusterWithMembers
+} from '@shared/types'
 import { IPC } from '@shared/ipc'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
@@ -14,7 +19,8 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 const api: MindForestApi = {
   app: {
     getInfo: () => ipcRenderer.invoke(IPC.appGetInfo),
-    openDataDir: () => ipcRenderer.invoke(IPC.appOpenDataDir)
+    openDataDir: () => ipcRenderer.invoke(IPC.appOpenDataDir),
+    migrationReport: () => ipcRenderer.invoke(IPC.appMigrationReport)
   },
   settings: {
     get: (input) => ipcRenderer.invoke(IPC.settingsGet, input),
@@ -26,27 +32,25 @@ const api: MindForestApi = {
     rename: (input) => ipcRenderer.invoke(IPC.projectsRename, input),
     delete: (input) => ipcRenderer.invoke(IPC.projectsDelete, input)
   },
-  cards: {
-    listByProject: (input) => ipcRenderer.invoke(IPC.cardsListByProject, input),
-    createChild: (input) => ipcRenderer.invoke(IPC.cardsCreateChild, input),
-    createBranch: (input) => ipcRenderer.invoke(IPC.cardsCreateBranch, input),
-    rename: (input) => ipcRenderer.invoke(IPC.cardsRename, input),
-    delete: (input) => ipcRenderer.invoke(IPC.cardsDelete, input),
-    generateTitle: (input) => ipcRenderer.invoke(IPC.cardsGenerateTitle, input),
-    onTitleUpdated: (callback: (card: Card) => void) => subscribe(IPC.cardsTitleUpdated, callback)
-  },
-  conversations: {
-    getByCard: (input) => ipcRenderer.invoke(IPC.conversationsGetByCard, input)
-  },
-  messages: {
-    list: (input) => ipcRenderer.invoke(IPC.messagesList, input),
-    appendUser: (input) => ipcRenderer.invoke(IPC.messagesAppendUser, input),
-    deleteTurn: (input) => ipcRenderer.invoke(IPC.messagesDeleteTurn, input),
-    edit: (input) => ipcRenderer.invoke(IPC.messagesEdit, input),
-    setActiveVariant: (input) => ipcRenderer.invoke(IPC.messagesSetActiveVariant, input)
-  },
-  quotes: {
-    listByConversation: (input) => ipcRenderer.invoke(IPC.quotesListByConversation, input)
+  tree: {
+    listNodes: (input) => ipcRenderer.invoke(IPC.treeListNodes, input),
+    getPath: (input) => ipcRenderer.invoke(IPC.treeGetPath, input),
+    listClusters: (input) => ipcRenderer.invoke(IPC.treeListClusters, input),
+    createCluster: (input) => ipcRenderer.invoke(IPC.treeCreateCluster, input),
+    renameCluster: (input) => ipcRenderer.invoke(IPC.treeRenameCluster, input),
+    summarizeCluster: (input) => ipcRenderer.invoke(IPC.treeSummarizeCluster, input),
+    setClusterCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetClusterCollapsed, input),
+    deleteCluster: (input) => ipcRenderer.invoke(IPC.treeDeleteCluster, input),
+    setMainBranch: (input) => ipcRenderer.invoke(IPC.treeSetMainBranch, input),
+    setArchived: (input) => ipcRenderer.invoke(IPC.treeSetArchived, input),
+    setCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetCollapsed, input),
+    deleteNode: (input) => ipcRenderer.invoke(IPC.treeDeleteNode, input),
+    restoreNode: (input) => ipcRenderer.invoke(IPC.treeRestoreNode, input),
+    purgeNode: (input) => ipcRenderer.invoke(IPC.treePurgeNode, input),
+    listDeleted: (input) => ipcRenderer.invoke(IPC.treeListDeleted, input),
+    editNode: (input) => ipcRenderer.invoke(IPC.treeEditNode, input),
+    onClusterUpdated: (callback: (cluster: ClusterWithMembers) => void) =>
+      subscribe(IPC.treeClusterUpdated, callback)
   },
   llmProfiles: {
     list: () => ipcRenderer.invoke(IPC.llmProfilesList),

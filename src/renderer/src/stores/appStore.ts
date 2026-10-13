@@ -2,20 +2,20 @@ import { create } from 'zustand'
 import type {
   AppInfo,
   AppPreferences,
-  Card,
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
-  Conversation,
-  EditMessageResult,
+  ClusterWithMembers,
   LlmProfile,
   LlmProfileInput,
   LlmProfileTestResult,
-  Message,
-  MessageQuote,
+  MigrationReport,
+  NodeMeta,
+  NodePathEntry,
   Project,
   QuoteInput,
-  TaskPreferences
+  TaskPreferences,
+  TurnNode
 } from '@shared/types'
 import {
   DEFAULT_PREFERENCES,
@@ -31,56 +31,68 @@ export const LAYOUT_STORAGE_KEY = 'mindforest.layout.v1'
 interface AppState {
   initialized: boolean
   info: AppInfo | null
+  migrationReport: MigrationReport | null
   projects: Project[]
   activeProjectId: string | null
-  cards: Card[]
-  activeCardId: string | null
-  conversation: Conversation | null
-  messages: Message[]
-  quotesByMessage: Record<string, MessageQuote[]>
+  nodes: NodeMeta[]
+  clusters: ClusterWithMembers[]
+  membership: Record<string, string>
+  activeNodeId: string | null
+  previewNodeId: string | null
+  pathNodes: NodePathEntry[]
+  selectedNodeIds: string[]
   pendingQuotes: QuoteInput[]
   profiles: LlmProfile[]
-  streaming: { requestId: string; messageId: string; conversationId: string } | null
-  streamContent: string
-  error: string | null
-  busy: boolean
-  systemDark: boolean
-  preferences: AppPreferences
   taskPreferences: TaskPreferences
-  titleGenerating: string[]
+  streaming: { requestId: string; nodeId: string } | null
+  streamContent: string
+  clusterSummarizing: string[]
+  notice: string | null
+  preferences: AppPreferences
+  systemDark: boolean
   panelsCollapsed: { sidebar: boolean; tree: boolean }
   layoutVersion: number
+  error: string | null
+  busy: boolean
+
   initialize: () => Promise<void>
   createProject: (name: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
   selectProject: (id: string) => Promise<void>
-  selectCard: (id: string) => Promise<void>
-  reloadConversation: () => Promise<void>
-  refreshCards: (projectId: string) => Promise<Card[]>
-  createChildCard: (parentCardId: string) => Promise<void>
-  createBranchCard: (fromMessageId: string) => Promise<void>
-  createBranchFromCard: (cardId: string) => Promise<void>
-  renameCard: (id: string, title: string) => Promise<void>
-  deleteCard: (id: string) => Promise<void>
-  deleteTurn: (turnIndex: number) => Promise<void>
-  editMessage: (messageId: string, content: string) => Promise<EditMessageResult | null>
-  setActiveVariant: (messageId: string) => Promise<void>
-  addPendingQuote: (quote: QuoteInput) => void
-  removePendingQuote: (index: number) => void
-  clearPendingQuotes: () => void
+  reloadTree: () => Promise<void>
+  openNode: (nodeId: string, mode: 'preview' | 'enter') => Promise<void>
+  enterFromPreview: () => Promise<void>
+  closeNode: () => void
   sendMessage: (content: string) => Promise<void>
-  regenerate: (turnIndex: number) => Promise<void>
+  regenerate: (nodeId: string) => Promise<void>
   cancelStream: () => Promise<void>
   applyDelta: (event: ChatDeltaEvent) => void
   applyChatResult: (event: ChatDoneEvent | ChatErrorEvent) => void
+  editNode: (nodeId: string, content: string, syncGroup?: boolean) => Promise<void>
+  deleteNode: (nodeId: string) => Promise<void>
+  restoreNode: (nodeId: string) => Promise<void>
+  purgeNode: (nodeId: string) => Promise<void>
+  setMainBranch: (nodeId: string) => Promise<void>
+  setArchived: (nodeId: string, archived: boolean) => Promise<void>
+  setCollapsed: (nodeId: string, collapsed: boolean) => Promise<void>
+  setSelection: (ids: string[]) => void
+  toggleNodeSelection: (nodeId: string) => void
+  clearSelection: () => void
+  createClusterFromSelection: () => Promise<void>
+  renameCluster: (id: string, title: string) => Promise<void>
+  summarizeCluster: (id: string) => Promise<void>
+  setClusterCollapsed: (id: string, collapsed: boolean) => Promise<void>
+  deleteCluster: (id: string) => Promise<void>
+  applyClusterUpdated: (cluster: ClusterWithMembers) => void
+  addPendingQuote: (quote: QuoteInput) => void
+  removePendingQuote: (index: number) => void
+  clearNotice: () => void
   loadProfiles: () => Promise<void>
   createProfile: (input: LlmProfileInput) => Promise<LlmProfile | null>
   updateProfile: (id: string, patch: Partial<LlmProfileInput>) => Promise<LlmProfile | null>
   removeProfile: (id: string) => Promise<void>
   setActiveProfile: (id: string) => Promise<void>
   testProfile: (id: string) => Promise<LlmProfileTestResult>
-  generateCardTitle: (cardId: string) => Promise<void>
-  applyTitleUpdated: (card: Card) => void
   setPreferences: (patch: Partial<AppPreferences>) => Promise<void>
   setTaskPreferences: (patch: Partial<TaskPreferences>) => Promise<void>
   togglePanel: (panel: 'sidebar' | 'tree') => void
@@ -99,39 +111,52 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
+function buildMembership(clusters: ClusterWithMembers[]): Record<string, string> {
+  const membership: Record<string, string> = {}
+  for (const cluster of clusters) {
+    for (const nodeId of cluster.nodeIds) membership[nodeId] = cluster.id
+  }
+  return membership
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   initialized: false,
   info: null,
+  migrationReport: null,
   projects: [],
   activeProjectId: null,
-  cards: [],
-  activeCardId: null,
-  conversation: null,
-  messages: [],
-  quotesByMessage: {},
+  nodes: [],
+  clusters: [],
+  membership: {},
+  activeNodeId: null,
+  previewNodeId: null,
+  pathNodes: [],
+  selectedNodeIds: [],
   pendingQuotes: [],
   profiles: [],
+  taskPreferences: DEFAULT_TASK_PREFERENCES,
   streaming: null,
   streamContent: '',
-  error: null,
-  busy: false,
-  systemDark: true,
+  clusterSummarizing: [],
+  notice: null,
   preferences: DEFAULT_PREFERENCES,
-  taskPreferences: DEFAULT_TASK_PREFERENCES,
-  titleGenerating: [],
+  systemDark: true,
   panelsCollapsed: { sidebar: false, tree: false },
   layoutVersion: 0,
+  error: null,
+  busy: false,
 
   initialize: async () => {
     set({ busy: true })
     try {
-      const [info, projects, profiles, storedPreferences, storedTaskPreferences] =
+      const [info, projects, profiles, storedPreferences, storedTask, migrationReport] =
         await Promise.all([
           window.mindforest.app.getInfo(),
           window.mindforest.projects.list(),
           window.mindforest.llmProfiles.list(),
           window.mindforest.settings.get({ key: PREFERENCES_KEY }),
-          window.mindforest.settings.get({ key: TASK_PREFERENCES_KEY })
+          window.mindforest.settings.get({ key: TASK_PREFERENCES_KEY }),
+          window.mindforest.app.migrationReport()
         ])
       let preferences = DEFAULT_PREFERENCES
       if (storedPreferences) {
@@ -142,14 +167,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
       let taskPreferences = DEFAULT_TASK_PREFERENCES
-      if (storedTaskPreferences) {
+      if (storedTask) {
         try {
-          taskPreferences = normalizeTaskPreferences(JSON.parse(storedTaskPreferences))
+          taskPreferences = normalizeTaskPreferences(JSON.parse(storedTask))
         } catch {
           taskPreferences = { ...DEFAULT_TASK_PREFERENCES }
         }
       }
-      set({ info, projects, profiles, preferences, taskPreferences, initialized: true, error: null })
+      set({
+        info,
+        projects,
+        profiles,
+        preferences,
+        taskPreferences,
+        migrationReport,
+        initialized: true,
+        error: null
+      })
       if (projects.length > 0) await get().selectProject(projects[0]!.id)
     } catch (error) {
       set({ error: errorMessage(error), initialized: true })
@@ -160,10 +194,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createProject: async (name) => {
     try {
-      const { project, rootCard } = await window.mindforest.projects.create({ name })
+      const { project } = await window.mindforest.projects.create({ name })
       set((state) => ({ projects: [project, ...state.projects], error: null }))
       await get().selectProject(project.id)
-      await get().selectCard(rootCard.id)
     } catch (error) {
       set({ error: errorMessage(error) })
     }
@@ -177,11 +210,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (get().activeProjectId === id) {
         set({
           activeProjectId: null,
-          cards: [],
-          activeCardId: null,
-          conversation: null,
-          messages: [],
-          quotesByMessage: {},
+          nodes: [],
+          clusters: [],
+          membership: {},
+          activeNodeId: null,
+          previewNodeId: null,
+          pathNodes: [],
+          selectedNodeIds: [],
           pendingQuotes: []
         })
         if (projects.length > 0) await get().selectProject(projects[0]!.id)
@@ -193,102 +228,41 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectProject: async (id) => {
     try {
-      const cards = await window.mindforest.cards.listByProject({ projectId: id })
-      const root = cards.find((card) => card.kind === 'root') ?? cards[0]
       set({
         activeProjectId: id,
-        cards,
-        activeCardId: null,
-        conversation: null,
-        messages: [],
-        quotesByMessage: {},
+        nodes: [],
+        clusters: [],
+        membership: {},
+        activeNodeId: null,
+        previewNodeId: null,
+        pathNodes: [],
+        selectedNodeIds: [],
         pendingQuotes: [],
         error: null
       })
-      if (root) await get().selectCard(root.id)
+      await get().reloadTree()
     } catch (error) {
       set({ error: errorMessage(error) })
     }
   },
 
-  selectCard: async (id) => {
-    try {
-      const card = get().cards.find((item) => item.id === id)
-      if (!card) return
-      const conversation = await window.mindforest.conversations.getByCard({ cardId: id })
-      set({
-        activeCardId: id,
-        conversation,
-        messages: [],
-        quotesByMessage: {},
-        pendingQuotes: [],
-        error: null
-      })
-      await get().reloadConversation()
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  reloadConversation: async () => {
-    const conversation = get().conversation
-    if (!conversation) return
-    const [messages, quotes] = await Promise.all([
-      window.mindforest.messages.list({ conversationId: conversation.id }),
-      window.mindforest.quotes.listByConversation({ conversationId: conversation.id })
+  reloadTree: async () => {
+    const projectId = get().activeProjectId
+    if (!projectId) return
+    const [nodes, clusters] = await Promise.all([
+      window.mindforest.tree.listNodes({ projectId }),
+      window.mindforest.tree.listClusters({ projectId })
     ])
-    const quotesByMessage: Record<string, MessageQuote[]> = {}
-    for (const quote of quotes) {
-      const list = quotesByMessage[quote.messageId] ?? []
-      list.push(quote)
-      quotesByMessage[quote.messageId] = list
-    }
-    set({ messages, quotesByMessage })
+    set({ nodes, clusters, membership: buildMembership(clusters) })
   },
 
-  refreshCards: async (projectId) => {
-    const cards = await window.mindforest.cards.listByProject({ projectId })
-    set({ cards })
-    return cards
-  },
-
-  createChildCard: async (parentCardId) => {
+  openNode: async (nodeId, mode) => {
     try {
-      const card = await window.mindforest.cards.createChild({ parentCardId })
-      await get().refreshCards(card.projectId)
-      await get().selectCard(card.id)
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  createBranchCard: async (fromMessageId) => {
-    const sourceCardId = get().activeCardId
-    if (!sourceCardId) return
-    try {
-      const card = await window.mindforest.cards.createBranch({ sourceCardId, fromMessageId })
-      await get().refreshCards(card.projectId)
-      await get().selectCard(card.id)
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  createBranchFromCard: async (cardId) => {
-    try {
-      const card = await window.mindforest.cards.createBranch({ sourceCardId: cardId })
-      await get().refreshCards(card.projectId)
-      await get().selectCard(card.id)
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  renameCard: async (id, title) => {
-    try {
-      const updated = await window.mindforest.cards.rename({ id, title })
+      const pathNodes = await window.mindforest.tree.getPath({ nodeId })
       set((state) => ({
-        cards: state.cards.map((card) => (card.id === updated.id ? updated : card)),
+        pathNodes,
+        previewNodeId: nodeId,
+        activeNodeId: mode === 'enter' ? nodeId : state.activeNodeId,
         error: null
       }))
     } catch (error) {
@@ -296,101 +270,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  deleteCard: async (id) => {
-    try {
-      await window.mindforest.cards.delete({ id })
-      const projectId = get().activeProjectId
-      if (!projectId) return
-      const cards = await get().refreshCards(projectId)
-      const activeCardId = get().activeCardId
-      if (!cards.some((card) => card.id === activeCardId)) {
-        const root = cards.find((card) => card.kind === 'root') ?? cards[0]
-        if (root) await get().selectCard(root.id)
-      }
-      set({ error: null })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
+  enterFromPreview: async () => {
+    const preview = get().previewNodeId
+    if (!preview) return
+    set({ activeNodeId: preview })
   },
 
-  deleteTurn: async (turnIndex) => {
-    const conversation = get().conversation
-    if (!conversation) return
-    try {
-      await window.mindforest.messages.deleteTurn({ conversationId: conversation.id, turnIndex })
-      await get().reloadConversation()
-      set({ error: null })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
+  closeNode: () => {
+    set({ previewNodeId: null, pathNodes: [] })
   },
-
-  editMessage: async (messageId, content) => {
-    try {
-      const result = await window.mindforest.messages.edit({ id: messageId, content })
-      await get().reloadConversation()
-      set({ error: null })
-      return result
-    } catch (error) {
-      set({ error: errorMessage(error) })
-      return null
-    }
-  },
-
-  setActiveVariant: async (messageId) => {
-    try {
-      await window.mindforest.messages.setActiveVariant({ id: messageId })
-      await get().reloadConversation()
-      set({ error: null })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  addPendingQuote: (quote) => {
-    set((state) => {
-      if (state.pendingQuotes.length >= 5) return state
-      return { pendingQuotes: [...state.pendingQuotes, quote] }
-    })
-  },
-
-  removePendingQuote: (index) => {
-    set((state) => ({ pendingQuotes: state.pendingQuotes.filter((_, i) => i !== index) }))
-  },
-
-  clearPendingQuotes: () => set({ pendingQuotes: [] }),
 
   sendMessage: async (content) => {
-    const conversation = get().conversation
-    if (!conversation || get().streaming) return
+    const projectId = get().activeProjectId
+    if (!projectId || get().streaming) return
+    const parentId = get().activeNodeId
     const quotes = get().pendingQuotes
     set({ busy: true })
     try {
       const result = await window.mindforest.chat.send({
-        conversationId: conversation.id,
+        projectId,
+        parentId,
         content,
         quotes: quotes.length > 0 ? quotes : undefined
       })
       streamBuffer = ''
-      set((state) => ({
+      set({
         pendingQuotes: [],
-        messages: [
-          ...state.messages.filter(
-            (message) =>
-              message.id !== result.userMessage.id && message.id !== result.assistantMessage.id
-          ),
-          result.userMessage,
-          result.assistantMessage
-        ],
-        streaming: {
-          requestId: result.requestId,
-          messageId: result.assistantMessage.id,
-          conversationId: conversation.id
-        },
+        streaming: { requestId: result.requestId, nodeId: result.node.id },
         streamContent: '',
+        activeNodeId: result.node.id,
+        previewNodeId: result.node.id,
         error: null
-      }))
-      await get().reloadConversation()
+      })
+      await get().reloadTree()
+      await get().openNode(result.node.id, 'enter')
     } catch (error) {
       set({ error: errorMessage(error) })
     } finally {
@@ -398,33 +311,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  regenerate: async (turnIndex) => {
-    const conversation = get().conversation
-    if (!conversation || get().streaming) return
+  regenerate: async (nodeId) => {
+    if (get().streaming) return
     set({ busy: true })
     try {
-      const result = await window.mindforest.chat.regenerate({
-        conversationId: conversation.id,
-        turnIndex
-      })
+      const result = await window.mindforest.chat.regenerate({ nodeId })
       streamBuffer = ''
-      set((state) => ({
-        messages: [
-          ...state.messages.map((message) =>
-            message.role === 'assistant' && message.turnIndex === turnIndex
-              ? { ...message, isActiveVariant: false }
-              : message
-          ),
-          result.assistantMessage
-        ],
-        streaming: {
-          requestId: result.requestId,
-          messageId: result.assistantMessage.id,
-          conversationId: conversation.id
-        },
+      set({
+        streaming: { requestId: result.requestId, nodeId: result.node.id },
         streamContent: '',
+        activeNodeId: result.node.id,
+        previewNodeId: result.node.id,
         error: null
-      }))
+      })
+      await get().reloadTree()
+      await get().openNode(result.node.id, 'enter')
     } catch (error) {
       set({ error: errorMessage(error) })
     } finally {
@@ -461,16 +362,202 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const streaming = get().streaming
     const wasTracked = streaming !== null && streaming.requestId === event.requestId
+    const node = event.node as TurnNode
     set((state) => ({
-      messages: state.messages.map((message) =>
-        message.id === event.message.id ? event.message : message
+      pathNodes: state.pathNodes.map((entry) =>
+        entry.id === node.id ? { ...entry, ...node } : entry
+      ),
+      nodes: state.nodes.map((meta) =>
+        meta.id === node.id
+          ? {
+              ...meta,
+              assistantStatus: node.assistantStatus,
+              assistantError: node.assistantError,
+              model: node.model
+            }
+          : meta
       ),
       streaming: wasTracked ? null : streaming,
       streamContent: '',
-      error: event.message.status === 'error' ? (event.message.errorMessage ?? '生成失败') : null
+      error: node.assistantStatus === 'error' ? (node.assistantError ?? '生成失败') : null
     }))
-    if (wasTracked) void get().reloadConversation()
+    if (wasTracked) void get().reloadTree()
   },
+
+  editNode: async (nodeId, content, syncGroup) => {
+    try {
+      await window.mindforest.tree.editNode({ nodeId, content, syncGroup })
+      await get().reloadTree()
+      const preview = get().previewNodeId
+      if (preview) await get().openNode(preview, 'preview')
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  deleteNode: async (nodeId) => {
+    try {
+      await window.mindforest.tree.deleteNode({ nodeId })
+      const affected = get().pathNodes.some((entry) => entry.id === nodeId)
+      if (affected) set({ previewNodeId: null, activeNodeId: null, pathNodes: [] })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  restoreNode: async (nodeId) => {
+    try {
+      await window.mindforest.tree.restoreNode({ nodeId })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  purgeNode: async (nodeId) => {
+    try {
+      await window.mindforest.tree.purgeNode({ nodeId })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  setMainBranch: async (nodeId) => {
+    try {
+      await window.mindforest.tree.setMainBranch({ nodeId })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  setArchived: async (nodeId, archived) => {
+    try {
+      await window.mindforest.tree.setArchived({ nodeId, archived })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  setCollapsed: async (nodeId, collapsed) => {
+    try {
+      await window.mindforest.tree.setCollapsed({ nodeId, collapsed })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  setSelection: (ids) => set({ selectedNodeIds: ids }),
+
+  toggleNodeSelection: (nodeId) => {
+    set((state) => {
+      const selected = state.selectedNodeIds.includes(nodeId)
+        ? state.selectedNodeIds.filter((id) => id !== nodeId)
+        : [...state.selectedNodeIds, nodeId]
+      return { selectedNodeIds: selected }
+    })
+  },
+
+  clearSelection: () => set({ selectedNodeIds: [] }),
+
+  createClusterFromSelection: async () => {
+    const projectId = get().activeProjectId
+    const nodeIds = get().selectedNodeIds
+    if (!projectId || nodeIds.length === 0) return
+    try {
+      const { cluster, addedNodeCount } = await window.mindforest.tree.createCluster({
+        projectId,
+        nodeIds
+      })
+      set({
+        selectedNodeIds: [],
+        notice:
+          addedNodeCount > 0
+            ? `已创建主题「${cluster.title}」，自动包含 ${addedNodeCount} 个中间节点`
+            : `已创建主题「${cluster.title}」`,
+        error: null
+      })
+      await get().reloadTree()
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  renameCluster: async (id, title) => {
+    try {
+      await window.mindforest.tree.renameCluster({ id, title })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  summarizeCluster: async (id) => {
+    if (get().clusterSummarizing.includes(id)) return
+    set((state) => ({ clusterSummarizing: [...state.clusterSummarizing, id] }))
+    try {
+      await window.mindforest.tree.summarizeCluster({ id })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    } finally {
+      set((state) => ({
+        clusterSummarizing: state.clusterSummarizing.filter((item) => item !== id)
+      }))
+    }
+  },
+
+  setClusterCollapsed: async (id, collapsed) => {
+    try {
+      await window.mindforest.tree.setClusterCollapsed({ id, collapsed })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  deleteCluster: async (id) => {
+    try {
+      await window.mindforest.tree.deleteCluster({ id })
+      await get().reloadTree()
+      set({ error: null })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  applyClusterUpdated: (cluster) => {
+    set((state) => ({
+      clusters: state.clusters.map((item) => (item.id === cluster.id ? cluster : item))
+    }))
+  },
+
+  addPendingQuote: (quote) => {
+    set((state) => {
+      if (state.pendingQuotes.length >= 5) return state
+      return { pendingQuotes: [...state.pendingQuotes, quote] }
+    })
+  },
+
+  removePendingQuote: (index) => {
+    set((state) => ({ pendingQuotes: state.pendingQuotes.filter((_, i) => i !== index) }))
+  },
+
+  clearNotice: () => set({ notice: null }),
 
   loadProfiles: async () => {
     try {
@@ -533,25 +620,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  generateCardTitle: async (cardId) => {
-    if (get().titleGenerating.includes(cardId)) return
-    set((state) => ({ titleGenerating: [...state.titleGenerating, cardId], error: null }))
+  setPreferences: async (patch) => {
+    const preferences = { ...get().preferences, ...patch }
+    set({ preferences })
     try {
-      const updated = await window.mindforest.cards.generateTitle({ id: cardId })
-      set((state) => ({
-        cards: state.cards.map((card) => (card.id === updated.id ? updated : card))
-      }))
+      await window.mindforest.settings.set({
+        key: PREFERENCES_KEY,
+        value: JSON.stringify(preferences)
+      })
     } catch (error) {
       set({ error: errorMessage(error) })
-    } finally {
-      set((state) => ({ titleGenerating: state.titleGenerating.filter((id) => id !== cardId) }))
     }
-  },
-
-  applyTitleUpdated: (card) => {
-    set((state) => ({
-      cards: state.cards.map((item) => (item.id === card.id ? card : item))
-    }))
   },
 
   setTaskPreferences: async (patch) => {
@@ -561,19 +640,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.mindforest.settings.set({
         key: TASK_PREFERENCES_KEY,
         value: JSON.stringify(taskPreferences)
-      })
-    } catch (error) {
-      set({ error: errorMessage(error) })
-    }
-  },
-
-  setPreferences: async (patch) => {
-    const preferences = { ...get().preferences, ...patch }
-    set({ preferences })
-    try {
-      await window.mindforest.settings.set({
-        key: PREFERENCES_KEY,
-        value: JSON.stringify(preferences)
       })
     } catch (error) {
       set({ error: errorMessage(error) })

@@ -88,7 +88,7 @@ export function Sidebar() {
           )}
         </ul>
         <p className="mt-3 text-[10px] leading-relaxed text-fg-subtle">
-          提示：右侧卡片树展示主题的层级结构，点击节点即可切换卡片。
+          提示：右侧主题对话树中，单击预览、双击进入并继续；每发送一条消息都会创建一个子节点。
         </p>
       </div>
     </CardShell>
