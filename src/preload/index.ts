@@ -13,7 +13,12 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 
 const api: MindForestApi = {
   app: {
-    getInfo: () => ipcRenderer.invoke(IPC.appGetInfo)
+    getInfo: () => ipcRenderer.invoke(IPC.appGetInfo),
+    openDataDir: () => ipcRenderer.invoke(IPC.appOpenDataDir)
+  },
+  settings: {
+    get: (input) => ipcRenderer.invoke(IPC.settingsGet, input),
+    set: (input) => ipcRenderer.invoke(IPC.settingsSet, input)
   },
   projects: {
     list: () => ipcRenderer.invoke(IPC.projectsList),

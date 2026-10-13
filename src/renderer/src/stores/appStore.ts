@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   AppInfo,
+  AppPreferences,
   Card,
   ChatDeltaEvent,
   ChatDoneEvent,
@@ -15,6 +16,11 @@ import type {
   Project,
   QuoteInput
 } from '@shared/types'
+import { DEFAULT_PREFERENCES } from '@shared/types'
+import { normalizePreferences } from '../theme/palettes'
+
+export const PREFERENCES_KEY = 'preferences.appearance'
+export const LAYOUT_STORAGE_KEY = 'mindforest.layout.v1'
 
 interface AppState {
   initialized: boolean
@@ -32,6 +38,10 @@ interface AppState {
   streamContent: string
   error: string | null
   busy: boolean
+  systemDark: boolean
+  preferences: AppPreferences
+  panelsCollapsed: { sidebar: boolean; tree: boolean }
+  layoutVersion: number
   initialize: () => Promise<void>
   createProject: (name: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
@@ -60,6 +70,10 @@ interface AppState {
   removeProfile: (id: string) => Promise<void>
   setActiveProfile: (id: string) => Promise<void>
   testProfile: (id: string) => Promise<LlmProfileTestResult>
+  setPreferences: (patch: Partial<AppPreferences>) => Promise<void>
+  togglePanel: (panel: 'sidebar' | 'tree') => void
+  setPanelCollapsed: (panel: 'sidebar' | 'tree', collapsed: boolean) => void
+  resetLayout: () => void
   clearError: () => void
 }
 
@@ -89,16 +103,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   streamContent: '',
   error: null,
   busy: false,
+  systemDark: true,
+  preferences: DEFAULT_PREFERENCES,
+  panelsCollapsed: { sidebar: false, tree: false },
+  layoutVersion: 0,
 
   initialize: async () => {
     set({ busy: true })
     try {
-      const [info, projects, profiles] = await Promise.all([
+      const [info, projects, profiles, storedPreferences] = await Promise.all([
         window.mindforest.app.getInfo(),
         window.mindforest.projects.list(),
-        window.mindforest.llmProfiles.list()
+        window.mindforest.llmProfiles.list(),
+        window.mindforest.settings.get({ key: PREFERENCES_KEY })
       ])
-      set({ info, projects, profiles, initialized: true, error: null })
+      let preferences = DEFAULT_PREFERENCES
+      if (storedPreferences) {
+        try {
+          preferences = normalizePreferences(JSON.parse(storedPreferences))
+        } catch {
+          preferences = { ...DEFAULT_PREFERENCES }
+        }
+      }
+      set({ info, projects, profiles, preferences, initialized: true, error: null })
       if (projects.length > 0) await get().selectProject(projects[0]!.id)
     } catch (error) {
       set({ error: errorMessage(error), initialized: true })
@@ -472,5 +499,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  setPreferences: async (patch) => {
+    const preferences = { ...get().preferences, ...patch }
+    set({ preferences })
+    try {
+      await window.mindforest.settings.set({
+        key: PREFERENCES_KEY,
+        value: JSON.stringify(preferences)
+      })
+    } catch (error) {
+      set({ error: errorMessage(error) })
+    }
+  },
+
+  togglePanel: (panel) => {
+    set((state) => ({
+      panelsCollapsed: { ...state.panelsCollapsed, [panel]: !state.panelsCollapsed[panel] }
+    }))
+  },
+
+  setPanelCollapsed: (panel, collapsed) => {
+    if (get().panelsCollapsed[panel] === collapsed) return
+    set((state) => ({
+      panelsCollapsed: { ...state.panelsCollapsed, [panel]: collapsed }
+    }))
+  },
+
+  resetLayout: () => {
+    try {
+      localStorage.removeItem(LAYOUT_STORAGE_KEY)
+    } catch {
+      void 0
+    }
+    set((state) => ({
+      panelsCollapsed: { sidebar: false, tree: false },
+      layoutVersion: state.layoutVersion + 1
+    }))
+  },
+
   clearError: () => set({ error: null })
 }))
+
+export function useEffectiveMode(): 'light' | 'dark' {
+  const mode = useAppStore((state) => state.preferences.mode)
+  const systemDark = useAppStore((state) => state.systemDark)
+  return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
+}

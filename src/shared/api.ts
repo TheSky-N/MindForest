@@ -19,6 +19,11 @@ import type {
 export interface MindForestApi {
   app: {
     getInfo(): Promise<AppInfo>
+    openDataDir(): Promise<void>
+  }
+  settings: {
+    get(input: { key: string }): Promise<string | null>
+    set(input: { key: string; value: string }): Promise<void>
   }
   projects: {
     list(): Promise<Project[]>

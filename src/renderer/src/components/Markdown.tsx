@@ -24,7 +24,7 @@ export const Markdown = memo(function Markdown({
   streaming?: boolean
 }) {
   return (
-    <div className="prose prose-invert prose-sm max-w-none break-words prose-pre:bg-transparent prose-pre:p-0">
+    <div className="prose prose-sm max-w-none break-words dark:prose-invert prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-fg-muted prose-code:text-accent prose-headings:text-fg prose-hr:border-border prose-li:text-fg prose-pre:bg-transparent prose-pre:p-0 prose-strong:text-fg prose-table:text-fg">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}

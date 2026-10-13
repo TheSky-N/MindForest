@@ -1,4 +1,5 @@
-import { app, ipcMain, type WebContents } from 'electron'
+import { app, ipcMain, shell, type WebContents } from 'electron'
+import { dirname } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, LlmProfile, LlmProfileInput, QuoteInput } from '@shared/types'
 import type { AppDatabase } from '../db/client'
@@ -9,6 +10,7 @@ import { createConversationRepository } from '../db/repositories/conversations'
 import { createMessageRepository } from '../db/repositories/messages'
 import { createLlmProfileRepository } from '../db/repositories/llmProfiles'
 import { createQuoteRepository } from '../db/repositories/quotes'
+import { createSettingsRepository } from '../db/repositories/settings'
 import { buildBranchContext } from '../context/branchContext'
 import { isSecureStorageAvailable } from '../secureStore'
 import { clearApiKey, getApiKey, hasSessionApiKey, storeApiKey } from '../security/apiKeys'
@@ -30,6 +32,7 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   const messages = createMessageRepository(db)
   const profiles = createLlmProfileRepository(db)
   const quotes = createQuoteRepository(db)
+  const settings = createSettingsRepository(db)
 
   const scheduleCardSummary = (cardId: string): void => {
     try {
@@ -83,6 +86,15 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     dbPath: getDatabasePath(),
     secureStorageAvailable: isSecureStorageAvailable()
   }))
+
+  ipcMain.handle(IPC.appOpenDataDir, () => shell.openPath(dirname(getDatabasePath())))
+
+  ipcMain.handle(IPC.settingsGet, (_event, input: { key: string }) =>
+    settings.get(input.key) ?? null
+  )
+  ipcMain.handle(IPC.settingsSet, (_event, input: { key: string; value: string }) => {
+    settings.set(input.key, input.value)
+  })
 
   ipcMain.handle(IPC.projectsList, () => projects.list())
   ipcMain.handle(IPC.projectsCreate, (_event, input: { name: string }) =>

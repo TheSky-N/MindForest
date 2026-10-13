@@ -1,9 +1,9 @@
 import type { CardKind } from '@shared/types'
 
 const styles: Record<CardKind, string> = {
-  root: 'bg-emerald-900/70 text-emerald-300',
-  child: 'bg-sky-900/70 text-sky-300',
-  branch: 'bg-amber-900/70 text-amber-300'
+  root: 'border-node-root-border bg-node-root text-node-root-fg',
+  child: 'border-node-child-border bg-node-child text-node-child-fg',
+  branch: 'border-node-branch-border bg-node-branch text-node-branch-fg'
 }
 
 const labels: Record<CardKind, string> = {
@@ -14,7 +14,7 @@ const labels: Record<CardKind, string> = {
 
 export function KindBadge({ kind }: { kind: CardKind }) {
   return (
-    <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] leading-none ${styles[kind]}`}>
+    <span className={`shrink-0 rounded border px-1 py-0.5 text-[10px] leading-none ${styles[kind]}`}>
       {labels[kind]}
     </span>
   )

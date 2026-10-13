@@ -81,3 +81,59 @@ test('完整闭环：建项目、配模型、流式对话并落库', async () =>
 
   await app.close()
 })
+
+test('主题偏好持久化与面板折叠生效', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-theme-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+
+  const initial = await window.evaluate(() => {
+    const sidebar = document.getElementById('sidebar')
+    return {
+      mode: document.documentElement.dataset.mode,
+      theme: document.documentElement.dataset.theme,
+      sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0
+    }
+  })
+  expect(initial.mode).toBe('dark')
+  expect(initial.theme).toBe('forest')
+  expect(initial.sidebarWidth).toBeGreaterThan(100)
+
+  await window.click('button[title="折叠侧栏"]')
+  await window.waitForTimeout(400)
+  const collapsedWidth = await window.evaluate(() => {
+    const sidebar = document.getElementById('sidebar')
+    return sidebar ? sidebar.getBoundingClientRect().width : -1
+  })
+  expect(collapsedWidth).toBeLessThan(5)
+
+  await window.evaluate(async () => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    await api.settings.set({
+      key: 'preferences.appearance',
+      value: JSON.stringify({ mode: 'light', themeId: 'nord', fontUi: '', fontCode: '' })
+    })
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+
+  const after = await window.evaluate(() => ({
+    mode: document.documentElement.dataset.mode,
+    theme: document.documentElement.dataset.theme,
+    bodyBg: getComputedStyle(document.body).backgroundColor,
+    sidebarWidth: document.getElementById('sidebar')?.getBoundingClientRect().width ?? 0
+  }))
+  expect(after.mode).toBe('light')
+  expect(after.theme).toBe('nord')
+  expect(after.bodyBg).toBe('rgb(233, 237, 244)')
+  expect(after.sidebarWidth).toBeGreaterThan(100)
+
+  await app.close()
+})

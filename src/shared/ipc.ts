@@ -1,5 +1,8 @@
 export const IPC = {
   appGetInfo: 'app:getInfo',
+  appOpenDataDir: 'app:openDataDir',
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
   projectsList: 'projects:list',
   projectsCreate: 'projects:create',
   projectsRename: 'projects:rename',

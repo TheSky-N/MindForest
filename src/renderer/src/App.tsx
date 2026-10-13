@@ -1,19 +1,37 @@
 import { useEffect, useState } from 'react'
-import { useAppStore } from './stores/appStore'
+import { useAppStore, useEffectiveMode } from './stores/appStore'
 import { TopBar } from './components/TopBar'
-import { Sidebar } from './components/Sidebar'
-import { ChatPanel } from './components/ChatPanel'
-import { CardTreePanel } from './components/CardTreePanel'
-import { SettingsPanel } from './components/SettingsPanel'
+import { ResizableLayout } from './components/layout/ResizableLayout'
+import { SettingsDialog } from './components/settings/SettingsDialog'
 
 export default function App() {
   const initialize = useAppStore((state) => state.initialize)
   const initialized = useAppStore((state) => state.initialized)
+  const preferences = useAppStore((state) => state.preferences)
+  const effectiveMode = useEffectiveMode()
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     void initialize()
   }, [initialize])
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = preferences.themeId
+    root.dataset.mode = effectiveMode
+    if (preferences.fontUi) root.style.setProperty('--font-ui', preferences.fontUi)
+    else root.style.removeProperty('--font-ui')
+    if (preferences.fontCode) root.style.setProperty('--font-code', preferences.fontCode)
+    else root.style.removeProperty('--font-code')
+  }, [preferences, effectiveMode])
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = () => useAppStore.setState({ systemDark: query.matches })
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -40,20 +58,18 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-200">
+    <div className="flex h-screen flex-col bg-app text-fg">
       <TopBar onOpenSettings={() => setSettingsOpen(true)} />
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
+      <div className="min-h-0 flex-1">
         {initialized ? (
-          <ChatPanel />
+          <ResizableLayout />
         ) : (
-          <main className="flex flex-1 items-center justify-center text-sm text-slate-500">
+          <main className="flex h-full items-center justify-center text-sm text-fg-subtle">
             正在初始化…
           </main>
         )}
-        <CardTreePanel />
       </div>
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

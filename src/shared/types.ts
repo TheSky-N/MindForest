@@ -125,3 +125,21 @@ export interface EditMessageResult {
   message: Message
   branchWarning: string | null
 }
+
+export type ColorMode = 'light' | 'dark' | 'system'
+
+export type ThemeId = 'forest' | 'nord' | 'gruvbox' | 'catppuccin' | 'solarized' | 'github'
+
+export interface AppPreferences {
+  mode: ColorMode
+  themeId: ThemeId
+  fontUi: string
+  fontCode: string
+}
+
+export const DEFAULT_PREFERENCES: AppPreferences = {
+  mode: 'dark',
+  themeId: 'forest',
+  fontUi: '',
+  fontCode: ''
+}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Maximize2, Minimize2, PanelRightClose } from 'lucide-react'
 import {
   Background,
   BackgroundVariant,
@@ -9,19 +10,31 @@ import {
   type ReactFlowInstance
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useAppStore } from '../stores/appStore'
+import { useAppStore, useEffectiveMode } from '../stores/appStore'
 import { buildCardTreeLayout, CARD_NODE_HEIGHT, CARD_NODE_WIDTH } from './tree/layout'
 import { CardFlowNode, type CardNodeData } from './tree/CardFlowNode'
+import { CardShell } from './layout/CardShell'
 
 const nodeTypes = { card: CardFlowNode }
 
-export function CardTreePanel() {
+function useCanvasDotColor(): string {
+  const themeId = useAppStore((state) => state.preferences.themeId)
+  const mode = useEffectiveMode()
+  return useMemo(() => {
+    void themeId
+    void mode
+    return getComputedStyle(document.documentElement)
+      .getPropertyValue('--mf-canvas-dot')
+      .trim()
+  }, [themeId, mode])
+}
+
+function Flow() {
   const cards = useAppStore((state) => state.cards)
   const activeCardId = useAppStore((state) => state.activeCardId)
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
   const selectCard = useAppStore((state) => state.selectCard)
-  const [fullscreen, setFullscreen] = useState(false)
   const [instance, setInstance] = useState<ReactFlowInstance | null>(null)
+  const dotColor = useCanvasDotColor()
 
   const layout = useMemo(() => buildCardTreeLayout(cards), [cards])
 
@@ -52,8 +65,8 @@ export function CardTreePanel() {
         type: 'smoothstep',
         style:
           edge.kind === 'branch'
-            ? { stroke: '#d97706', strokeDasharray: '4 3' }
-            : { stroke: '#475569' }
+            ? { stroke: 'var(--mf-warning)', strokeDasharray: '4 3' }
+            : { stroke: 'var(--mf-edge)' }
       })),
     [layout]
   )
@@ -63,7 +76,7 @@ export function CardTreePanel() {
     instance.fitView({ padding: 0.25, duration: 200 })
   }, [instance, layout])
 
-  const flow = (
+  return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -78,47 +91,91 @@ export function CardTreePanel() {
       minZoom={0.2}
       maxZoom={2}
       proOptions={{ hideAttribution: true }}
-      className="bg-slate-950"
+      className="bg-app"
     >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#1e293b" />
+      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color={dotColor} />
       <Controls showInteractive={false} position="bottom-right" />
     </ReactFlow>
   )
+}
 
-  if (!activeProjectId) return null
+export function CardTreePanel() {
+  const activeProjectId = useAppStore((state) => state.activeProjectId)
+  const togglePanel = useAppStore((state) => state.togglePanel)
+  const [fullscreen, setFullscreen] = useState(false)
+
+  if (!activeProjectId) {
+    return (
+      <CardShell
+        header={
+          <>
+            <h2 className="flex-1 text-xs font-medium text-fg-muted">卡片树</h2>
+            <button
+              type="button"
+              title="折叠卡片树"
+              onClick={() => togglePanel('tree')}
+              className="rounded p-1 text-fg-subtle hover:bg-card-muted hover:text-fg"
+            >
+              <PanelRightClose className="h-3.5 w-3.5" />
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-xs text-fg-subtle">
+          创建或选择一个项目后，这里会显示主题卡片树。
+        </div>
+      </CardShell>
+    )
+  }
 
   if (fullscreen) {
     return (
-      <div className="fixed inset-0 z-40 flex flex-col bg-slate-950">
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/60 px-4 py-2">
-          <h2 className="text-xs font-medium text-slate-300">卡片树（全屏）</h2>
+      <div className="fixed inset-0 z-40 flex flex-col bg-app text-fg">
+        <header className="flex shrink-0 items-center justify-between border-b border-border bg-card px-4 py-2">
+          <h2 className="text-xs font-medium text-fg-muted">卡片树（全屏）</h2>
           <button
             type="button"
             onClick={() => setFullscreen(false)}
-            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800"
+            className="flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-fg-muted hover:bg-card-muted"
           >
+            <Minimize2 className="h-3 w-3" />
             退出全屏
           </button>
         </header>
-        <div className="min-h-0 flex-1">{flow}</div>
+        <div className="min-h-0 flex-1">
+          <Flow />
+        </div>
       </div>
     )
   }
 
   return (
-    <aside className="hidden w-80 shrink-0 flex-col border-l border-slate-800 bg-slate-900/20 lg:flex">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-800 px-3 py-2">
-        <h2 className="text-xs font-medium text-slate-400">卡片树</h2>
-        <button
-          type="button"
-          title="全屏查看"
-          onClick={() => setFullscreen(true)}
-          className="rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-800 hover:text-slate-200"
-        >
-          ⛶
-        </button>
-      </header>
-      <div className="min-h-0 flex-1">{flow}</div>
-    </aside>
+    <CardShell
+      header={
+        <>
+          <h2 className="flex-1 text-xs font-medium text-fg-muted">卡片树</h2>
+          <button
+            type="button"
+            title="全屏查看"
+            onClick={() => setFullscreen(true)}
+            className="rounded p-1 text-fg-subtle hover:bg-card-muted hover:text-fg"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            title="折叠卡片树"
+            onClick={() => togglePanel('tree')}
+            className="rounded p-1 text-fg-subtle hover:bg-card-muted hover:text-fg"
+          >
+            <PanelRightClose className="h-3.5 w-3.5" />
+          </button>
+        </>
+      }
+    >
+      <div className="min-h-0 flex-1">
+        <Flow />
+      </div>
+    </CardShell>
   )
 }

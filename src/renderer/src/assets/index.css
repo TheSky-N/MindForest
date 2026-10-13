@@ -1,5 +1,40 @@
 @import 'tailwindcss';
+@import './themes.css';
 @plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:where([data-mode='dark'], [data-mode='dark'] *));
+
+@theme inline {
+  --color-app: var(--mf-app);
+  --color-card: var(--mf-card);
+  --color-card-muted: var(--mf-card-muted);
+  --color-popover: var(--mf-popover);
+  --color-border: var(--mf-border);
+  --color-border-strong: var(--mf-border-strong);
+  --color-fg: var(--mf-fg);
+  --color-fg-muted: var(--mf-fg-muted);
+  --color-fg-subtle: var(--mf-fg-subtle);
+  --color-accent: var(--mf-accent);
+  --color-accent-hover: var(--mf-accent-hover);
+  --color-accent-fg: var(--mf-accent-fg);
+  --color-ring: var(--mf-ring);
+  --color-danger: var(--mf-danger);
+  --color-warning: var(--mf-warning);
+  --color-node-root: var(--mf-node-root-bg);
+  --color-node-root-border: var(--mf-node-root-border);
+  --color-node-root-fg: var(--mf-node-root-fg);
+  --color-node-child: var(--mf-node-child-bg);
+  --color-node-child-border: var(--mf-node-child-border);
+  --color-node-child-fg: var(--mf-node-child-fg);
+  --color-node-branch: var(--mf-node-branch-bg);
+  --color-node-branch-border: var(--mf-node-branch-border);
+  --color-node-branch-fg: var(--mf-node-branch-fg);
+  --color-edge: var(--mf-edge);
+  --color-canvas-dot: var(--mf-canvas-dot);
+  --color-bubble-user: var(--mf-bubble-user-bg);
+  --color-bubble-user-fg: var(--mf-bubble-user-fg);
+  --color-bubble-ai: var(--mf-bubble-ai-bg);
+}
 
 html,
 body,
@@ -9,15 +44,46 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    'Noto Sans SC',
-    'Microsoft YaHei',
-    sans-serif;
+  font-family: var(--font-ui);
+  background-color: var(--mf-app);
+  color: var(--mf-fg);
   overscroll-behavior: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mf-border-strong) transparent;
+}
+
+::selection {
+  background: var(--mf-selection);
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-code);
 }
 
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.react-flow__controls button {
+  background: var(--mf-card);
+  border-bottom: 1px solid var(--mf-border);
+  color: var(--mf-fg);
+}
+
+.react-flow__controls button:hover {
+  background: var(--mf-card-muted);
+}
+
+.react-flow__controls button svg {
+  fill: currentColor;
+}
+
+.react-flow__attribution {
+  display: none;
 }

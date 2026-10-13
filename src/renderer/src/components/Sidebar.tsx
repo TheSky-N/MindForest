@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { PanelLeftClose } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
+import { CardShell } from './layout/CardShell'
 
 export function Sidebar() {
   const projects = useAppStore((state) => state.projects)
@@ -7,6 +9,7 @@ export function Sidebar() {
   const createProject = useAppStore((state) => state.createProject)
   const selectProject = useAppStore((state) => state.selectProject)
   const deleteProject = useAppStore((state) => state.deleteProject)
+  const togglePanel = useAppStore((state) => state.togglePanel)
   const [name, setName] = useState('')
 
   const submit = () => {
@@ -17,9 +20,22 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40">
-      <section className="flex min-h-0 flex-1 flex-col border-b border-slate-800 p-3">
-        <h2 className="mb-2 text-xs font-medium text-slate-400">项目</h2>
+    <CardShell
+      header={
+        <>
+          <h2 className="flex-1 text-xs font-medium text-fg-muted">项目</h2>
+          <button
+            type="button"
+            title="折叠侧栏"
+            onClick={() => togglePanel('sidebar')}
+            className="rounded p-1 text-fg-subtle hover:bg-card-muted hover:text-fg"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </button>
+        </>
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col p-3">
         <div className="flex gap-2">
           <input
             value={name}
@@ -28,12 +44,12 @@ export function Sidebar() {
               if (event.key === 'Enter') submit()
             }}
             placeholder="新项目名称"
-            className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs outline-none focus:border-emerald-600"
+            className="min-w-0 flex-1 rounded border border-border bg-app px-2 py-1 text-xs outline-none focus:border-accent"
           />
           <button
             type="button"
             onClick={submit}
-            className="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600"
+            className="rounded bg-accent px-2 py-1 text-xs text-accent-fg hover:bg-accent-hover"
           >
             新建
           </button>
@@ -47,9 +63,7 @@ export function Sidebar() {
                   type="button"
                   onClick={() => void selectProject(project.id)}
                   className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-xs ${
-                    active
-                      ? 'bg-emerald-900/50 text-emerald-200'
-                      : 'text-slate-300 hover:bg-slate-800/70'
+                    active ? 'bg-accent/15 text-accent' : 'text-fg-muted hover:bg-card-muted'
                   }`}
                 >
                   {project.name}
@@ -62,7 +76,7 @@ export function Sidebar() {
                       void deleteProject(project.id)
                     }
                   }}
-                  className="hidden rounded px-1 text-slate-600 hover:text-rose-400 group-hover:block"
+                  className="hidden rounded px-1 text-fg-subtle hover:text-danger group-hover:block"
                 >
                   ✕
                 </button>
@@ -70,13 +84,13 @@ export function Sidebar() {
             )
           })}
           {projects.length === 0 && (
-            <li className="px-1 text-[11px] text-slate-600">还没有项目，创建一个开始探索</li>
+            <li className="px-1 text-[11px] text-fg-subtle">还没有项目，创建一个开始探索</li>
           )}
         </ul>
-        <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
+        <p className="mt-3 text-[10px] leading-relaxed text-fg-subtle">
           提示：右侧卡片树展示主题的层级结构，点击节点即可切换卡片。
         </p>
-      </section>
-    </aside>
+      </div>
+    </CardShell>
   )
 }
