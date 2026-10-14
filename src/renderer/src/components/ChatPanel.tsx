@@ -22,6 +22,7 @@ import type { HistoryExportFormat, NodePathEntry } from '@shared/types'
 import { useAppStore, EMPTY_TAB, type TabState } from '../stores/appStore'
 import { Markdown } from './Markdown'
 import { CardShell } from './layout/CardShell'
+import { TabBar } from './layout/TabBar'
 
 type TabSlice = { tabs: TabState[]; activeTabId: string | null }
 
@@ -103,6 +104,7 @@ function NodeTurn({
   const regenerate = useAppStore((state) => state.regenerate)
   const deleteNode = useAppStore((state) => state.deleteNode)
   const editNode = useAppStore((state) => state.editNode)
+  const editNodeBranchAndSend = useAppStore((state) => state.editNodeBranchAndSend)
   const toggleAnswerCollapsed = useAppStore((state) => state.toggleAnswerCollapsed)
   const setUserCollapsed = useAppStore((state) => state.setUserCollapsed)
   const foldLines = useAppStore((state) => state.preferences.chat.foldLines)
@@ -177,13 +179,21 @@ function NodeTurn({
 
   const commitEdit = async () => {
     const trimmed = draft.trim()
+    if (!trimmed) return
+    setEditing(false)
+    setDraft(trimmed)
+    await editNodeBranchAndSend(entry.id, trimmed)
+  }
+
+  const overwriteEdit = async () => {
+    const trimmed = draft.trim()
     if (!trimmed || trimmed === entry.userContent) {
       setEditing(false)
       setDraft(entry.userContent)
       return
     }
     const confirmed = window.confirm(
-      '保存后将删除该节点的全部子节点（可在回收站恢复）。继续？'
+      '覆盖修改将删除该节点的全部子节点（可在回收站恢复）。继续？'
     )
     if (!confirmed) return
     await editNode(entry.id, trimmed, syncGroup)
@@ -224,6 +234,12 @@ function NodeTurn({
             rows={3}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault()
+                void commitEdit()
+              }
+            }}
             className="w-full resize-none rounded-lg border border-accent bg-app px-3 py-2 text-sm outline-none"
           />
           {groupCount > 1 && (
@@ -233,10 +249,13 @@ function NodeTurn({
                 checked={syncGroup}
                 onChange={(event) => setSyncGroup(event.target.checked)}
               />
-              同步更新同组的其他回答版本
+              覆盖修改时同步更新同组的其他回答版本
             </label>
           )}
-          <div className="mt-1 flex justify-end gap-2 text-[11px]">
+          <div className="mt-1 flex items-center justify-end gap-2 text-[11px]">
+            <span className="mr-auto text-[10px] text-fg-subtle">
+              新开分支会保留当前分支并重新生成（Ctrl+Enter）
+            </span>
             <button
               type="button"
               onClick={() => {
@@ -249,10 +268,18 @@ function NodeTurn({
             </button>
             <button
               type="button"
+              title="删除该节点的全部子节点（可在回收站恢复）"
+              onClick={() => void overwriteEdit()}
+              className="rounded border border-warning/50 px-2 py-1 text-warning hover:bg-warning/10"
+            >
+              覆盖修改
+            </button>
+            <button
+              type="button"
               onClick={() => void commitEdit()}
               className="rounded bg-accent px-2 py-1 text-accent-fg hover:bg-accent-hover"
             >
-              保存
+              新开分支并发送
             </button>
           </div>
         </div>
@@ -292,7 +319,7 @@ function NodeTurn({
             >
               <div
                 style={userFolded ? lineClampStyle(foldLines) : undefined}
-                className="whitespace-pre-wrap"
+                className={renderUserMarkdown && !userFolded ? '' : 'whitespace-pre-wrap'}
               >
                 {renderUserMarkdown && !userFolded ? (
                   <div className="[&_*]:!text-inherit">
@@ -768,6 +795,7 @@ export function ChatPanel() {
   const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
   const enterFromPreview = useAppStore((state) => state.enterFromPreview)
   const saveHistory = useAppStore((state) => state.saveHistory)
+  const tabsPosition = useAppStore((state) => state.preferences.ui.tabsPosition)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportNotice, setExportNotice] = useState<string | null>(null)
 
@@ -789,15 +817,20 @@ export function ChatPanel() {
     }
   }
 
-  if (!activeProjectId) {
-    return (
-      <CardShell>
-        <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
-          在左侧创建或选择项目，开始你的主题探索。
-        </div>
-      </CardShell>
-    )
-  }
+  const emptyHint = (
+    <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
+      在左侧创建或选择项目，开始你的主题探索。
+    </div>
+  )
+
+  const conversation = activeProjectId ? (
+    <>
+      <PathList />
+      <Composer />
+    </>
+  ) : (
+    emptyHint
+  )
 
   return (
     <CardShell
@@ -862,8 +895,17 @@ export function ChatPanel() {
           {exportNotice}
         </div>
       )}
-      <PathList />
-      <Composer />
+      {tabsPosition === 'left' ? (
+        <div className="flex min-h-0 flex-1">
+          <TabBar orientation="left" />
+          <div className="flex min-h-0 flex-1 flex-col">{conversation}</div>
+        </div>
+      ) : (
+        <>
+          <TabBar orientation="top" />
+          {conversation}
+        </>
+      )}
     </CardShell>
   )
 }

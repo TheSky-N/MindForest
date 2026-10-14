@@ -82,6 +82,23 @@ describe('可见主题对话树（向下）', () => {
     }
   })
 
+  it('跨分支间距不会因深层子树被过度拉宽', () => {
+    const nodes = [
+      meta({ id: 'root', isMainBranch: true }),
+      meta({ id: 'a', parentId: 'root', isMainBranch: true }),
+      meta({ id: 'b', parentId: 'root', sortOrder: 1 }),
+      meta({ id: 'a1', parentId: 'a', isMainBranch: true }),
+      meta({ id: 'a2', parentId: 'a1', isMainBranch: true }),
+      meta({ id: 'a3', parentId: 'a2', isMainBranch: true })
+    ]
+    const result = buildVisibleTree({ nodes, clusters: [], membership: {} }, SIZE)
+    const a = result.nodes.find((node) => node.id === 'a')!
+    const b = result.nodes.find((node) => node.id === 'b')!
+    const gap = Math.abs(b.x - a.x)
+    expect(gap).toBeGreaterThanOrEqual(SIZE.nodeWidth)
+    expect(gap).toBeLessThanOrEqual(300)
+  })
+
   it('折叠节点隐藏其后代但自身可见', () => {
     const nodes = baseTree().map((node) =>
       node.id === 'a' ? { ...node, isCollapsed: true } : node

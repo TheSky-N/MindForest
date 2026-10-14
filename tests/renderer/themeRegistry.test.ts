@@ -180,8 +180,12 @@ describe('主题注册表', () => {
       baseFontSize: 12,
       chatFontSize: 20,
       markdownHeadingScale: 80,
-      tabsPosition: 'left'
+      tabsPosition: 'left',
+      tabsCollapsed: false
     })
+    expect(
+      normalizePreferences({ ui: { tabsPosition: 'left', tabsCollapsed: true } }).ui
+    ).toEqual({ ...DEFAULT_UI_PREFERENCES, tabsPosition: 'left', tabsCollapsed: true })
   })
 
   it('每套主题的三种节点颜色互不相同', () => {

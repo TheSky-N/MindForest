@@ -37,6 +37,7 @@ export interface VisibleTreeNode {
   meta?: NodeMeta
   cluster?: ClusterWithMembers
   childCount: number
+  siblingCount: number
   isMainBranch: boolean
   isArchived: boolean
   isCollapsed: boolean
@@ -186,6 +187,7 @@ export function buildVisibleTree(
       y: 0,
       cluster,
       childCount: cluster.nodeIds.length,
+      siblingCount: 1,
       isMainBranch: entry.isMainBranch,
       isArchived: false,
       isCollapsed: cluster.isCollapsed,
@@ -225,6 +227,11 @@ export function buildVisibleTree(
       y: 0,
       meta: node,
       childCount,
+      siblingCount: node.parentId
+        ? input.nodes.filter(
+            (sibling) => sibling.parentId === node.parentId && !sibling.deletedAt
+          ).length
+        : 1,
       isMainBranch: node.isMainBranch,
       isArchived: node.isArchived,
       isCollapsed: node.isCollapsed,
@@ -280,7 +287,9 @@ export function buildVisibleTree(
     })
     const rootDatum = toDatum(rootId)
     const rootNode = hierarchy(rootDatum, (datum) => datum.children)
-    tree<Datum>().nodeSize([options.nodeWidth + gapX, options.nodeHeight + gapY])(rootNode)
+    tree<Datum>()
+      .nodeSize([options.nodeWidth + gapX, options.nodeHeight + gapY])
+      .separation((a, b) => (a.parent === b.parent ? 1 : 1.2))(rootNode)
     const descendants = rootNode.descendants()
     const xs = descendants.map((node) => node.x ?? 0)
     const minX = Math.min(...xs)
@@ -316,6 +325,7 @@ export function buildVisibleTree(
       isGroupBox: true,
       cluster,
       childCount: unique.length,
+      siblingCount: 1,
       isMainBranch: false,
       isArchived: false,
       isCollapsed: false,

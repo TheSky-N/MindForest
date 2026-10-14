@@ -297,7 +297,11 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
       140,
       DEFAULT_UI_PREFERENCES.markdownHeadingScale
     ),
-    tabsPosition: record.tabsPosition === 'left' ? 'left' : 'top'
+    tabsPosition: record.tabsPosition === 'left' ? 'left' : 'top',
+    tabsCollapsed:
+      typeof record.tabsCollapsed === 'boolean'
+        ? record.tabsCollapsed
+        : DEFAULT_UI_PREFERENCES.tabsCollapsed
   }
 }
 

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppStore, useEffectiveMode } from './stores/appStore'
 import { TopBar } from './components/TopBar'
-import { TabBar } from './components/layout/TabBar'
 import { ResizableLayout } from './components/layout/ResizableLayout'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 
@@ -99,9 +98,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-app text-fg">
       <TopBar onOpenSettings={() => setSettingsOpen(true)} />
-      {preferences.ui.tabsPosition === 'top' && <TabBar orientation="top" />}
       <div className="flex min-h-0 flex-1">
-        {preferences.ui.tabsPosition === 'left' && <TabBar orientation="left" />}
         <div className="min-h-0 min-w-0 flex-1">
           {initialized ? (
             <ResizableLayout />

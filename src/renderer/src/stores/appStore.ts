@@ -93,9 +93,11 @@ interface AppState {
   renameProject: (id: string, name: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
   openProjectTab: (projectId: string) => Promise<void>
+  openNodeInNewTab: (nodeId: string) => Promise<void>
   newTab: () => Promise<void>
   closeTab: (tabId: string) => Promise<void>
   closeOtherTabs: (tabId: string) => Promise<void>
+  reorderTab: (tabId: string, toIndex: number) => void
   activateTab: (tabId: string) => Promise<void>
   cycleTab: (direction: 1 | -1) => Promise<void>
   reloadTree: () => Promise<void>
@@ -108,6 +110,7 @@ interface AppState {
   applyDelta: (event: ChatDeltaEvent) => void
   applyChatResult: (event: ChatDoneEvent | ChatErrorEvent) => void
   editNode: (nodeId: string, content: string, syncGroup?: boolean) => Promise<void>
+  editNodeBranchAndSend: (nodeId: string, content: string) => Promise<void>
   renameNode: (nodeId: string, title: string | null) => Promise<void>
   generateNodeTitle: (nodeId: string) => Promise<void>
   deleteNode: (nodeId: string) => Promise<void>
@@ -473,6 +476,22 @@ export const useAppStore = create<AppState>((set, get) => {
       persistTabs()
     },
 
+    openNodeInNewTab: async (nodeId) => {
+      const current = getActiveTab()
+      if (!current) return
+      const id = newTabId()
+      set((state) => ({
+        tabs: [
+          ...state.tabs,
+          { ...makeTab(id, current.projectId), activeNodeId: nodeId, previewNodeId: nodeId }
+        ],
+        activeTabId: id,
+        error: null
+      }))
+      await ensureTabLoaded(id)
+      persistTabs()
+    },
+
     newTab: async () => {
       const current = getActiveTab()
       const projectId = current?.projectId ?? get().projects[0]?.id
@@ -511,6 +530,19 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ tabs: [keep], activeTabId: tabId })
       persistTabs()
       await ensureTabLoaded(tabId)
+    },
+
+    reorderTab: (tabId, toIndex) => {
+      const tabs = get().tabs
+      const from = tabs.findIndex((tab) => tab.id === tabId)
+      if (from < 0) return
+      const target = Math.min(Math.max(toIndex, 0), tabs.length - 1)
+      if (from === target) return
+      const next = tabs.slice()
+      const [moved] = next.splice(from, 1)
+      next.splice(target, 0, moved!)
+      set({ tabs: next })
+      persistTabs()
     },
 
     activateTab: async (tabId) => {
@@ -688,6 +720,45 @@ export const useAppStore = create<AppState>((set, get) => {
         () => window.mindforest.tree.editNode({ nodeId, content, syncGroup }),
         { refreshPath: true }
       )
+    },
+
+    editNodeBranchAndSend: async (nodeId, content) => {
+      const tab = getActiveTab()
+      const trimmed = content.trim()
+      if (!tab || tab.streaming || !trimmed) return
+      const entry = tab.pathNodes.find((item) => item.id === nodeId)
+      if (!entry) return
+      set({ busy: true })
+      try {
+        const result = await window.mindforest.chat.send({
+          projectId: tab.projectId,
+          parentId: entry.parentId,
+          content: trimmed,
+          quotes:
+            entry.quotes.length > 0
+              ? entry.quotes.map((quote) => ({
+                  quotedNodeId: quote.quotedNodeId,
+                  quoteText: quote.quoteText
+                }))
+              : undefined
+        })
+        streamBuffers.set(tab.id, '')
+        patchTab(tab.id, {
+          streaming: { requestId: result.requestId, nodeId: result.node.id },
+          streamContent: '',
+          activeNodeId: result.node.id,
+          previewNodeId: result.node.id
+        })
+        persistTabs()
+        await loadTabTree(tab.id)
+        const pathNodes = await window.mindforest.tree.getPath({ nodeId: result.node.id })
+        patchTab(tab.id, { pathNodes })
+        set({ error: null })
+      } catch (error) {
+        set({ error: errorMessage(error) })
+      } finally {
+        set({ busy: false })
+      }
     },
 
     renameNode: async (nodeId, title) => {

@@ -223,6 +223,7 @@ export interface UiPreferences {
   chatFontSize: number
   markdownHeadingScale: number
   tabsPosition: TabsPosition
+  tabsCollapsed: boolean
 }
 
 export interface TreeAppearancePreferences {
@@ -308,7 +309,8 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   baseFontSize: 16,
   chatFontSize: 14,
   markdownHeadingScale: 100,
-  tabsPosition: 'top'
+  tabsPosition: 'top',
+  tabsCollapsed: false
 }
 
 export const DEFAULT_PREFERENCES: AppPreferences = {

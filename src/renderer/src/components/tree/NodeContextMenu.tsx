@@ -5,6 +5,7 @@ import {
   ArrowRightToLine,
   ChevronDown,
   ChevronUp,
+  CopyPlus,
   GitBranch,
   Layers,
   Pencil,
@@ -31,6 +32,7 @@ export interface NodeContextMenuProps {
   onEdit: (vnode: VisibleTreeNode) => void
   onRename: (vnode: VisibleTreeNode) => void
   onGenerateTitle: (vnode: VisibleTreeNode) => void
+  onOpenInNewTab: (vnode: VisibleTreeNode) => void
   onDelete: (vnode: VisibleTreeNode) => void
   onRenameCluster: (clusterId: string, title: string) => void
   onSummarizeCluster: (clusterId: string) => void
@@ -148,8 +150,13 @@ export function NodeContextMenu(props: NodeContextMenuProps) {
               onClick={run(() => props.onToggleCollapse(vnode))}
             />
           )}
-          {vnode.meta && vnode.meta.parentId && !vnode.isMainBranch && (
-            <MenuItem icon={GitBranch} label="设为主分支" onClick={run(() => props.onSetMain(vnode))} />
+          {vnode.meta?.parentId && vnode.siblingCount > 1 && (
+            <MenuItem
+              icon={GitBranch}
+              label={vnode.isMainBranch ? '已是主分支' : '设为主分支'}
+              disabled={vnode.isMainBranch}
+              onClick={run(() => props.onSetMain(vnode))}
+            />
           )}
           <MenuItem
             icon={vnode.isArchived ? ArchiveRestore : Archive}
@@ -171,6 +178,11 @@ export function NodeContextMenu(props: NodeContextMenuProps) {
             icon={Sparkles}
             label="AI 生成标题"
             onClick={run(() => props.onGenerateTitle(vnode))}
+          />
+          <MenuItem
+            icon={CopyPlus}
+            label="从节点新建标签页"
+            onClick={run(() => props.onOpenInNewTab(vnode))}
           />
           <div className="my-1 border-t border-border" />
           {selectionCount > 0 && (

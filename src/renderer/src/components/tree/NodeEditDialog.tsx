@@ -7,7 +7,8 @@ export function NodeEditDialog({
   onSyncGroupChange,
   showSync,
   onCancel,
-  onConfirm
+  onOverwrite,
+  onBranchAndSend
 }: {
   value: string
   onChange: (value: string) => void
@@ -15,7 +16,8 @@ export function NodeEditDialog({
   onSyncGroupChange: (value: boolean) => void
   showSync: boolean
   onCancel: () => void
-  onConfirm: () => void
+  onOverwrite: () => void
+  onBranchAndSend: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -38,6 +40,17 @@ export function NodeEditDialog({
           rows={4}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              onCancel()
+              return
+            }
+            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+              event.preventDefault()
+              onBranchAndSend()
+            }
+          }}
           className="w-full resize-none rounded border border-border bg-app px-2 py-1.5 text-sm outline-none focus:border-accent"
         />
         {showSync && (
@@ -47,11 +60,14 @@ export function NodeEditDialog({
               checked={syncGroup}
               onChange={(event) => onSyncGroupChange(event.target.checked)}
             />
-            同步更新同组的其他回答版本
+            覆盖修改时同步更新同组的其他回答版本
           </label>
         )}
-        <p className="mt-2 text-[11px] text-warning">
-          保存后将删除该节点的全部子节点（可在回收站恢复）。
+        <p className="mt-2 text-[11px] text-fg-subtle">
+          「新开分支并发送」会保留当前分支，在同一父节点下创建新分支并重新生成（Ctrl+Enter）。
+        </p>
+        <p className="mt-1 text-[11px] text-warning">
+          「覆盖修改」将删除该节点的全部子节点（可在回收站恢复）。
         </p>
         <div className="mt-3 flex justify-end gap-2 text-xs">
           <button
@@ -63,10 +79,18 @@ export function NodeEditDialog({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={onOverwrite}
+            title="删除该节点的全部子节点（可在回收站恢复）"
+            className="rounded border border-warning/50 px-3 py-1.5 text-warning hover:bg-warning/10"
+          >
+            覆盖修改
+          </button>
+          <button
+            type="button"
+            onClick={onBranchAndSend}
             className="rounded bg-accent px-3 py-1.5 text-accent-fg hover:bg-accent-hover"
           >
-            保存
+            新开分支并发送
           </button>
         </div>
       </div>

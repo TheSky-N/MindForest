@@ -84,16 +84,19 @@ function Flow() {
 
   const openNode = useAppStore((state) => state.openNode)
   const setSelection = useAppStore((state) => state.setSelection)
+  const clearSelection = useAppStore((state) => state.clearSelection)
   const setMainBranch = useAppStore((state) => state.setMainBranch)
   const setArchived = useAppStore((state) => state.setArchived)
   const setCollapsed = useAppStore((state) => state.setCollapsed)
   const deleteNode = useAppStore((state) => state.deleteNode)
   const regenerate = useAppStore((state) => state.regenerate)
   const editNode = useAppStore((state) => state.editNode)
+  const editNodeBranchAndSend = useAppStore((state) => state.editNodeBranchAndSend)
   const createClusterFromSelection = useAppStore((state) => state.createClusterFromSelection)
   const renameCluster = useAppStore((state) => state.renameCluster)
   const renameNode = useAppStore((state) => state.renameNode)
   const generateNodeTitle = useAppStore((state) => state.generateNodeTitle)
+  const openNodeInNewTab = useAppStore((state) => state.openNodeInNewTab)
   const summarizeCluster = useAppStore((state) => state.summarizeCluster)
   const setClusterCollapsed = useAppStore((state) => state.setClusterCollapsed)
   const deleteCluster = useAppStore((state) => state.deleteCluster)
@@ -114,6 +117,11 @@ function Flow() {
   const [deletedOpen, setDeletedOpen] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
+  const [boxRect, setBoxRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
+    null
+  )
+  const containerRef = useRef<HTMLDivElement>(null)
+  const boxFlowRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
   const lastClickRef = useRef<{ id: string; at: number } | null>(null)
   const dotColor = useCanvasDotColor()
 
@@ -228,7 +236,7 @@ function Flow() {
           },
           draggable: false,
           connectable: false,
-          selectable: !isGroupBox,
+          selectable: false,
           zIndex: isGroupBox ? -1 : 0,
           style: isGroupBox
             ? { width: vnode.width ?? nodeSize.width, height: vnode.height ?? nodeSize.height }
@@ -290,8 +298,82 @@ function Flow() {
     return () => window.clearTimeout(timer)
   }, [notice, clearNotice])
 
+  const beginBoxSelect = (event: React.PointerEvent) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (!target.closest('.react-flow__pane')) return
+    if (target.closest('.react-flow__node') || target.closest('.react-flow__panel')) return
+    if (!(selectMode || shiftPressed)) {
+      clearSelection()
+      return
+    }
+    const container = containerRef.current
+    if (!container) return
+    const bounds = container.getBoundingClientRect()
+    const startX = event.clientX - bounds.left
+    const startY = event.clientY - bounds.top
+    const additive = event.shiftKey
+    setBoxRect({ x1: startX, y1: startY, x2: startX, y2: startY })
+    boxFlowRef.current = null
+    const toFlow = (clientX: number, clientY: number) =>
+      instance ? instance.screenToFlowPosition({ x: clientX, y: clientY }) : null
+    const startFlow = toFlow(event.clientX, event.clientY)
+    const onMove = (moveEvent: PointerEvent) => {
+      setBoxRect((prev) =>
+        prev
+          ? { ...prev, x2: moveEvent.clientX - bounds.left, y2: moveEvent.clientY - bounds.top }
+          : prev
+      )
+      const endFlow = toFlow(moveEvent.clientX, moveEvent.clientY)
+      if (startFlow && endFlow) {
+        boxFlowRef.current = {
+          x1: startFlow.x,
+          y1: startFlow.y,
+          x2: endFlow.x,
+          y2: endFlow.y
+        }
+      }
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const rectArea = boxFlowRef.current
+      boxFlowRef.current = null
+      setBoxRect(null)
+      if (!rectArea) {
+        if (!additive) clearSelection()
+        return
+      }
+      const minX = Math.min(rectArea.x1, rectArea.x2)
+      const maxX = Math.max(rectArea.x1, rectArea.x2)
+      const minY = Math.min(rectArea.y1, rectArea.y2)
+      const maxY = Math.max(rectArea.y1, rectArea.y2)
+      const hitIds = result.nodes
+        .filter((vnode) => !vnode.isGroupBox)
+        .filter((vnode) => {
+          const width = vnode.width ?? nodeSize.width
+          const height = vnode.height ?? nodeSize.height
+          return vnode.x < maxX && vnode.x + width > minX && vnode.y < maxY && vnode.y + height > minY
+        })
+        .flatMap((vnode) =>
+          vnode.kind === 'cluster' && vnode.cluster ? vnode.cluster.nodeIds : [vnode.id]
+        )
+      const state = useAppStore.getState()
+      const current =
+        state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
+      const next = additive ? Array.from(new Set([...current, ...hitIds])) : hitIds
+      setSelection(next)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   return (
-    <div className="relative h-full w-full">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full"
+      onPointerDownCapture={beginBoxSelect}
+    >
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -300,7 +382,7 @@ function Flow() {
         onNodeClick={(event, node) => {
           const vnode = result.nodes.find((item) => item.id === node.id)
           if (!vnode) return
-          if (event.ctrlKey || event.metaKey) {
+          if (event.ctrlKey || event.metaKey || event.shiftKey) {
             const state = useAppStore.getState()
             const current =
               state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
@@ -333,24 +415,6 @@ function Flow() {
           const vnode = result.nodes.find((item) => item.id === node.id)
           if (vnode) setMenu({ vnode, x: event.clientX, y: event.clientY })
         }}
-        onSelectionChange={(params) => {
-          const ids: string[] = []
-          for (const node of params.nodes) {
-            const vnode = result.nodes.find((item) => item.id === node.id)
-            if (!vnode) continue
-            if (vnode.kind === 'cluster' && vnode.cluster) {
-              ids.push(...vnode.cluster.nodeIds)
-            } else {
-              ids.push(node.id)
-            }
-          }
-          const state = useAppStore.getState()
-          const current =
-            state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
-          const same =
-            current.length === ids.length && ids.every((id, index) => current[index] === id)
-          if (!same) setSelection(ids)
-        }}
         onPaneClick={() => {
           setMenu(null)
           setPaneMenu(null)
@@ -365,8 +429,7 @@ function Flow() {
         }}
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable
-        selectionOnDrag={selectMode || shiftPressed}
+        elementsSelectable={false}
         panOnDrag={selectMode || shiftPressed ? [1, 2] : true}
         selectionKeyCode={null}
         multiSelectionKeyCode={null}
@@ -382,6 +445,19 @@ function Flow() {
         <Background variant={BackgroundVariant.Dots} gap={18} size={1} color={dotColor} />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
+
+      {boxRect && (
+        <div
+          data-box-select
+          style={{
+            left: Math.min(boxRect.x1, boxRect.x2),
+            top: Math.min(boxRect.y1, boxRect.y2),
+            width: Math.abs(boxRect.x2 - boxRect.x1),
+            height: Math.abs(boxRect.y2 - boxRect.y1)
+          }}
+          className="pointer-events-none absolute z-20 rounded border border-accent bg-accent/10"
+        />
+      )}
 
       {selectedNodeIds.length > 0 && !menu && (
         <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-lg border border-border bg-popover px-2 py-1.5 text-[11px] shadow-lg">
@@ -491,6 +567,7 @@ function Flow() {
             setRenamingNode({ nodeId: vnode.id, value: vnode.meta?.title ?? '' })
           }
           onGenerateTitle={(vnode) => void generateNodeTitle(vnode.id)}
+          onOpenInNewTab={(vnode) => void openNodeInNewTab(vnode.id)}
           onSummarizeCluster={(clusterId) => void summarizeCluster(clusterId)}
           onToggleClusterCollapsed={(clusterId, collapsed) =>
             void setClusterCollapsed(clusterId, collapsed)
@@ -545,9 +622,14 @@ function Flow() {
           onSyncGroupChange={(value) => setEditing({ ...editing, syncGroup: value })}
           showSync={editing.showSync}
           onCancel={() => setEditing(null)}
-          onConfirm={() => {
+          onOverwrite={() => {
             const trimmed = editing.value.trim()
             if (trimmed) void editNode(editing.nodeId, trimmed, editing.syncGroup)
+            setEditing(null)
+          }}
+          onBranchAndSend={() => {
+            const trimmed = editing.value.trim()
+            if (trimmed) void editNodeBranchAndSend(editing.nodeId, trimmed)
             setEditing(null)
           }}
         />

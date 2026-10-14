@@ -36,7 +36,9 @@ test.beforeAll(async () => {
           return
         }
         response.writeHead(200, { 'Content-Type': 'text/event-stream' })
-        response.write('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n')
+        response.write(
+          'data: {"choices":[{"delta":{"content":"你好\\n第一行\\n第二行\\n\\n第三行"}}]}\n\n'
+        )
         response.write(
           'data: {"choices":[],"usage":{"prompt_tokens":33,"completion_tokens":11,"total_tokens":44}}\n\n'
         )
@@ -718,7 +720,8 @@ test('重命名、复制、标点输入与外观设置', async () => {
   await window.locator('button[title="复制回答（Markdown）"]').first().click()
   await window.waitForTimeout(300)
   const clipboardText = await app.evaluate(({ clipboard }) => clipboard.readText())
-  expect(clipboardText).toBe('你好')
+  expect(clipboardText).toContain('你好')
+  expect(clipboardText).toContain('第三行')
 
   await window.locator('textarea').first().focus()
   const shiftPrevented = window.evaluate(
@@ -767,6 +770,310 @@ test('重命名、复制、标点输入与外观设置', async () => {
     .first()
     .evaluate((element) => getComputedStyle(element).backgroundColor)
   expect(mainBackground).toBe('rgb(18, 52, 86)')
+
+  await app.close()
+})
+
+test('v0.2.4：新开分支编辑、Markdown 段落与深层主分支', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-v024a-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const seeded = await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('timeout')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(t)
+            resolve()
+          })
+        })
+      const { project } = await api.projects.create({ name: 'v024A' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const ids: string[] = []
+      let parentId: string | null = null
+      for (const content of ['第一行\n第二行\n\n第三行', '第二个问题']) {
+        const done = waitDone()
+        const result = await api.chat.send({ projectId: project.id, parentId, content })
+        await done
+        ids.push(result.node.id)
+        parentId = result.node.id
+      }
+      const done = waitDone()
+      const regen = await api.chat.regenerate({ nodeId: ids[1]! })
+      await done
+      return { projectId: project.id, ids, regenId: regen.node.id }
+    },
+    { port: mockPort }
+  )
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`).click()
+  await window.waitForTimeout(500)
+  await expect(window.locator('[data-user-bubble] .prose p')).toHaveCount(2)
+  await expect(window.locator('[data-user-bubble] .prose p br')).toHaveCount(0)
+  await expect(window.locator('[data-answer] .prose p')).toHaveCount(2)
+  await expect(window.locator('[data-answer] .prose p br')).toHaveCount(0)
+
+  const waitDone = () =>
+    window.evaluate(
+      () =>
+        new Promise<boolean>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('timeout')), 15000)
+          const off = (
+            window as unknown as { mindforest: MindForestApi }
+          ).mindforest.chat.onDone(() => {
+            off()
+            clearTimeout(t)
+            resolve(true)
+          })
+        })
+    )
+
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
+    .click({ button: 'right' })
+  await window.locator('text=编辑消息').click()
+  await window.locator('textarea').last().fill('修改后的问题')
+  const donePromise = waitDone()
+  await window.locator('button:has-text("新开分支并发送")').click()
+  await donePromise
+  await window.waitForTimeout(600)
+
+  await expect(window.locator('[data-turn-id]').first()).toContainText('修改后的问题')
+  const afterEdit = await window.evaluate(
+    async ({ projectId, rootId }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const nodes = await api.tree.listNodes({ projectId })
+      return {
+        originalAlive: nodes.some((node) => node.id === rootId && node.deletedAt === null),
+        siblings: nodes.filter((node) => node.parentId === null && node.deletedAt === null).length
+      }
+    },
+    { projectId: seeded.projectId, rootId: seeded.ids[0]! }
+  )
+  expect(afterEdit.originalAlive).toBe(true)
+  expect(afterEdit.siblings).toBe(2)
+
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
+    .click({ button: 'right' })
+  await expect(window.locator('text=已是主分支')).toHaveCount(1)
+  await window.keyboard.press('Escape')
+  await window.waitForTimeout(200)
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.regenId}"]`)
+    .click({ button: 'right' })
+  await window.locator('text=设为主分支').click()
+  const flags = await window.evaluate(
+    async ({ projectId, regenId, originalId }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const nodes = await api.tree.listNodes({ projectId })
+      return {
+        regenMain: nodes.find((node) => node.id === regenId)?.isMainBranch ?? false,
+        originalMain: nodes.find((node) => node.id === originalId)?.isMainBranch ?? true
+      }
+    },
+    { projectId: seeded.projectId, regenId: seeded.regenId, originalId: seeded.ids[1]! }
+  )
+  expect(flags.regenMain).toBe(true)
+  expect(flags.originalMain).toBe(false)
+
+  await app.close()
+})
+
+test('v0.2.4：卡内标签栏、折叠拖宽排序、从节点新建标签页与多选', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-v024b-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const seeded = await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('timeout')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(t)
+            resolve()
+          })
+        })
+      const { project } = await api.projects.create({ name: '项目A' })
+      await api.projects.create({ name: '项目B' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const ids: string[] = []
+      let parentId: string | null = null
+      for (const content of ['第一问', '第二问']) {
+        const done = waitDone()
+        const result = await api.chat.send({ projectId: project.id, parentId, content })
+        await done
+        ids.push(result.node.id)
+        parentId = result.node.id
+      }
+      return { ids }
+    },
+    { port: mockPort }
+  )
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  const insideCard = await window.evaluate(() => {
+    const tab = document.querySelector('[data-tab-id]')
+    return Boolean(tab && tab.closest('.rounded-xl.bg-card'))
+  })
+  expect(insideCard).toBe(true)
+
+  await window.locator('button:has-text("项目B")').first().click()
+  await window.waitForTimeout(500)
+  await expect(window.locator('[data-tab-id]')).toHaveCount(2)
+
+  const readOrder = () =>
+    window.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-tab-id]')).map(
+        (element) => element.dataset.tabId
+      )
+    )
+  const orderBefore = await readOrder()
+  const firstBox = await window.locator('[data-tab-id]').first().boundingBox()
+  const secondBox = await window.locator('[data-tab-id]').nth(1).boundingBox()
+  if (!firstBox || !secondBox) throw new Error('未找到标签页')
+  await window.mouse.move(
+    firstBox.x + firstBox.width / 2,
+    firstBox.y + firstBox.height / 2
+  )
+  await window.mouse.down()
+  await window.mouse.move(
+    secondBox.x + secondBox.width / 2 + 30,
+    secondBox.y + secondBox.height / 2,
+    { steps: 10 }
+  )
+  await window.mouse.up()
+  await window.waitForTimeout(400)
+  const orderAfter = await readOrder()
+  expect(orderAfter[0]).toBe(orderBefore[1])
+  expect(orderAfter[1]).toBe(orderBefore[0])
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+  expect(await readOrder()).toEqual(orderAfter)
+
+  await window.evaluate(async () => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    const raw = await api.settings.get({ key: 'preferences.appearance' })
+    const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    prefs.ui = { tabsPosition: 'left' }
+    await api.settings.set({ key: 'preferences.appearance', value: JSON.stringify(prefs) })
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForTimeout(900)
+  await expect(window.locator('#tabbar')).toHaveCount(1)
+  const expandedWidth = await window
+    .locator('#tabbar')
+    .evaluate((element) => element.getBoundingClientRect().width)
+  await window.click('button[title="折叠标签页"]')
+  await window.waitForTimeout(300)
+  const collapsedWidth = await window
+    .locator('#tabbar')
+    .evaluate((element) => element.getBoundingClientRect().width)
+  expect(collapsedWidth).toBeLessThan(40)
+  expect(expandedWidth).toBeGreaterThan(100)
+  await window.click('button[title="展开标签页"]')
+  await window.waitForTimeout(300)
+
+  const handle = window.locator('[title^="拖动调整标签栏宽度"]')
+  const handleBox = await handle.boundingBox()
+  if (!handleBox) throw new Error('未找到宽度拖拽手柄')
+  await window.mouse.move(handleBox.x + 2, handleBox.y + handleBox.height / 2)
+  await window.mouse.down()
+  await window.mouse.move(handleBox.x + 80, handleBox.y + handleBox.height / 2, { steps: 6 })
+  await window.mouse.up()
+  await window.waitForTimeout(250)
+  const storedWidth = await window.evaluate(() =>
+    Number(localStorage.getItem('mindforest.tabs.width'))
+  )
+  expect(storedWidth).toBeGreaterThan(176)
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForTimeout(900)
+  const persistedWidth = await window
+    .locator('#tabbar')
+    .evaluate((element) => element.getBoundingClientRect().width)
+  expect(Math.abs(persistedWidth - storedWidth)).toBeLessThanOrEqual(2)
+
+  await window.locator('[data-tab-id]', { hasText: '项目A' }).first().click()
+  await window.waitForTimeout(700)
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click({ button: 'right' })
+  await window.locator('text=从节点新建标签页').click()
+  await window.waitForTimeout(800)
+  await expect(window.locator('[data-tab-id]')).toHaveCount(3)
+  await expect(window.locator('[data-turn-id]').first()).toContainText('第二问')
+  await expect(window.locator('textarea').first()).toBeEnabled()
+
+  await expect(window.locator('[data-selected="true"]')).toHaveCount(0)
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
+    .click({ modifiers: ['Control'] })
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
+    .click({ modifiers: ['Control'] })
+  await expect(window.locator('[data-selected="true"]')).toHaveCount(2)
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
+    .click({ modifiers: ['Shift'] })
+  await expect(window.locator('[data-selected="true"]')).toHaveCount(1)
+
+  const paneBox = await window.locator('.react-flow__pane').boundingBox()
+  if (!paneBox) throw new Error('未找到画布')
+  await window.mouse.click(paneBox.x + 15, paneBox.y + paneBox.height - 15)
+  await expect(window.locator('[data-selected="true"]')).toHaveCount(0)
+
+  await window.click('button[title^="选择模式"]')
+  const boxA = await window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`).boundingBox()
+  const boxB = await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).boundingBox()
+  if (!boxA || !boxB) throw new Error('未找到节点')
+  const startX = Math.max(paneBox.x + 8, Math.min(boxA.x, boxB.x) - 30)
+  const startY = Math.max(paneBox.y + 8, Math.min(boxA.y, boxB.y) - 30)
+  await window.mouse.move(startX, startY)
+  await window.mouse.down()
+  await window.mouse.move(
+    Math.max(boxA.x + boxA.width, boxB.x + boxB.width) + 30,
+    Math.max(boxA.y + boxA.height, boxB.y + boxB.height) + 30,
+    { steps: 10 }
+  )
+  await window.mouse.up()
+  await window.waitForTimeout(300)
+  await expect(window.locator('[data-selected="true"]')).toHaveCount(2)
+  await window.click('button[title^="退出选择模式"]')
 
   await app.close()
 })

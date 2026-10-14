@@ -58,6 +58,7 @@ export const TreeNodeView = memo(function TreeNodeView({ data }: NodeProps<TreeF
     <div
       title={tooltip}
       style={data.style ?? undefined}
+      data-selected={data.selected ? 'true' : 'false'}
       className={`box-border flex h-full w-full cursor-pointer items-center gap-1 border text-xs shadow-sm ${
         shapeStyles[data.shape]
       } ${
