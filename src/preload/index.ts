@@ -44,6 +44,7 @@ const api: MindForestApi = {
     setMainBranch: (input) => ipcRenderer.invoke(IPC.treeSetMainBranch, input),
     setArchived: (input) => ipcRenderer.invoke(IPC.treeSetArchived, input),
     setCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetCollapsed, input),
+    setAnswerCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetAnswerCollapsed, input),
     deleteNode: (input) => ipcRenderer.invoke(IPC.treeDeleteNode, input),
     restoreNode: (input) => ipcRenderer.invoke(IPC.treeRestoreNode, input),
     purgeNode: (input) => ipcRenderer.invoke(IPC.treePurgeNode, input),
@@ -67,6 +68,9 @@ const api: MindForestApi = {
     onDelta: (callback: (event: ChatDeltaEvent) => void) => subscribe(IPC.chatDelta, callback),
     onDone: (callback: (event: ChatDoneEvent) => void) => subscribe(IPC.chatDone, callback),
     onError: (callback: (event: ChatErrorEvent) => void) => subscribe(IPC.chatError, callback)
+  },
+  export: {
+    saveHistory: (input) => ipcRenderer.invoke(IPC.exportSaveHistory, input)
   }
 }
 

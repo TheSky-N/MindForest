@@ -1,8 +1,14 @@
+import type { TokenUsage } from '@shared/types'
 import { iterateSseData } from './sse'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+}
+
+export interface StreamChatResult {
+  content: string
+  usage: TokenUsage | null
 }
 
 export interface StreamChatOptions {
@@ -15,7 +21,7 @@ export interface StreamChatOptions {
   onDelta?: (delta: string) => void
 }
 
-export type StreamChatCompletionFn = (options: StreamChatOptions) => Promise<string>
+export type StreamChatCompletionFn = (options: StreamChatOptions) => Promise<StreamChatResult>
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
@@ -54,22 +60,54 @@ function extractMessageContent(payload: unknown): string | null {
   return typeof content === 'string' ? content : null
 }
 
+function toCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function extractUsage(payload: unknown): TokenUsage | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const usage = (payload as { usage?: unknown }).usage
+  if (typeof usage !== 'object' || usage === null) return null
+  const record = usage as Record<string, unknown>
+  const promptTokens = toCount(record.prompt_tokens ?? record.prompt_eval_count)
+  const completionTokens = toCount(record.completion_tokens ?? record.eval_count)
+  if (promptTokens === null || completionTokens === null) return null
+  return { promptTokens, completionTokens }
+}
+
+const streamOptionsRetryPattern = /stream_options|include_usage/i
+
 export const streamChatCompletion: StreamChatCompletionFn = async (options) => {
-  const response = await fetch(buildChatCompletionsUrl(options.baseUrl), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(options.apiKey) },
-    body: JSON.stringify({
+  const requestBody = (includeUsage: boolean): string =>
+    JSON.stringify({
       model: options.model,
       messages: options.messages,
       temperature: options.temperature,
-      stream: true
-    }),
-    signal: options.signal
-  })
+      stream: true,
+      ...(includeUsage ? { stream_options: { include_usage: true } } : {})
+    })
+
+  const send = (includeUsage: boolean): Promise<Response> =>
+    fetch(buildChatCompletionsUrl(options.baseUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(options.apiKey) },
+      body: requestBody(includeUsage),
+      signal: options.signal
+    })
+
+  let response = await send(true)
+  if (!response.ok && (response.status === 400 || response.status === 422)) {
+    const body = await response.text().catch(() => '')
+    if (!streamOptionsRetryPattern.test(body)) {
+      throw new Error(`模型接口返回 ${response.status}${body ? `：${body.slice(0, 300)}` : ''}`)
+    }
+    response = await send(false)
+  }
   await ensureOk(response)
   if (!response.body) throw new Error('模型接口没有返回流式内容')
 
   let full = ''
+  let usage: TokenUsage | null = null
   for await (const data of iterateSseData(response.body)) {
     if (data === '[DONE]') break
     let payload: unknown
@@ -78,13 +116,15 @@ export const streamChatCompletion: StreamChatCompletionFn = async (options) => {
     } catch {
       continue
     }
+    const chunkUsage = extractUsage(payload)
+    if (chunkUsage) usage = chunkUsage
     const delta = extractDelta(payload)
     if (delta) {
       full += delta
       options.onDelta?.(delta)
     }
   }
-  return full
+  return { content: full, usage }
 }
 
 export async function completeChat(

@@ -167,9 +167,7 @@ export function NodeContextMenu(props: NodeContextMenuProps) {
               onClick={run(() => props.onCreateClusterFromSelection())}
             />
           )}
-          {vnode.meta?.parentId && (
-            <MenuItem icon={Trash2} label="删除节点" danger onClick={run(() => props.onDelete(vnode))} />
-          )}
+          <MenuItem icon={Trash2} label="删除节点" danger onClick={run(() => props.onDelete(vnode))} />
         </>
       )}
     </div>

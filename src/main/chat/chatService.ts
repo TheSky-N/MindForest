@@ -13,6 +13,7 @@ import { createQuoteRepository } from '../db/repositories/quotes'
 import { newId } from '../db/ids'
 import { assembleNodeContext } from '../llm/contextAssembler'
 import { streamChatCompletion, type StreamChatCompletionFn } from '../llm/client'
+import { countTokens } from '../llm/tokens'
 
 export interface RuntimeProfile {
   baseUrl: string
@@ -102,7 +103,7 @@ export function createChatService(options: {
 
     void (async () => {
       try {
-        const content = await streamFn({
+        const result = await streamFn({
           baseUrl: input.profile.baseUrl,
           apiKey: input.profile.apiKey,
           model: input.profile.model,
@@ -118,20 +119,36 @@ export function createChatService(options: {
           }
         })
         flushDeltas()
+        const usage = result.usage ?? {
+          promptTokens: context.estimatedTokens,
+          completionTokens: countTokens(result.content)
+        }
         const updated = nodeRepo.completeAssistant(
           input.node.id,
-          content,
-          input.profile.model
+          result.content,
+          input.profile.model,
+          usage
         )
         projectRepo.touch(input.node.projectId)
         events.done({ requestId, node: updated })
       } catch (error) {
         flushDeltas()
+        const partialUsage = buffer
+          ? {
+              promptTokens: context.estimatedTokens,
+              completionTokens: countTokens(buffer)
+            }
+          : undefined
         if (controller.signal.aborted || isAbortError(error)) {
-          const updated = nodeRepo.abortAssistant(input.node.id, buffer)
+          const updated = nodeRepo.abortAssistant(input.node.id, buffer, partialUsage)
           events.error({ requestId, node: updated })
         } else {
-          const updated = nodeRepo.failAssistant(input.node.id, errorMessage(error), buffer)
+          const updated = nodeRepo.failAssistant(
+            input.node.id,
+            errorMessage(error),
+            buffer,
+            partialUsage
+          )
           events.error({ requestId, node: updated })
         }
         projectRepo.touch(input.node.projectId)

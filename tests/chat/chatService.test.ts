@@ -41,7 +41,7 @@ describe('对话服务（节点模型）', () => {
     const streamFn: StreamChatCompletionFn = async (options) => {
       options.onDelta?.('你')
       options.onDelta?.('好')
-      return '你好'
+      return { content: '你好', usage: null }
     }
     const { service, nodes, project } = setup(streamFn)
 
@@ -62,10 +62,33 @@ describe('对话服务（节点模型）', () => {
     const stored = nodes.getOrThrow(result.node.id)
     expect(stored.assistantStatus).toBe('complete')
     expect(stored.assistantContent).toBe('你好')
+    expect(stored.promptTokens).toBeGreaterThan(0)
+    expect(stored.completionTokens).toBeGreaterThan(0)
+  })
+
+  it('接口返回 usage 时按真实 token 落库', async () => {
+    const streamFn: StreamChatCompletionFn = async (options) => {
+      options.onDelta?.('回答')
+      return { content: '回答', usage: { promptTokens: 123, completionTokens: 45 } }
+    }
+    const { service, nodes, project } = setup(streamFn)
+
+    const result = await service.send({
+      projectId: project.id,
+      parentId: null,
+      content: '统计 token',
+      profile,
+      events: noopEvents
+    })
+    await flush()
+
+    const stored = nodes.getOrThrow(result.node.id)
+    expect(stored.promptTokens).toBe(123)
+    expect(stored.completionTokens).toBe(45)
   })
 
   it('从指定节点继续会创建子节点', async () => {
-    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const streamFn: StreamChatCompletionFn = async () => ({ content: '回答', usage: null })
     const { service, nodes, project } = setup(streamFn)
 
     const first = await service.send({
@@ -92,7 +115,7 @@ describe('对话服务（节点模型）', () => {
   })
 
   it('重新生成会创建同组平行节点', async () => {
-    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const streamFn: StreamChatCompletionFn = async () => ({ content: '回答', usage: null })
     const { service, nodes, project } = setup(streamFn)
 
     const first = await service.send({
@@ -124,7 +147,7 @@ describe('对话服务（节点模型）', () => {
 
   it('取消后保留部分内容并标记 aborted', async () => {
     const streamFn: StreamChatCompletionFn = (options) =>
-      new Promise((_resolve, reject) => {
+      new Promise<never>((_resolve, reject) => {
         options.onDelta?.('已生成一半')
         options.signal?.addEventListener('abort', () => {
           reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
@@ -179,7 +202,7 @@ describe('对话服务（节点模型）', () => {
   it('流结束通知 onTurnSettled 以触发链摘要', async () => {
     const settled = vi.fn()
     let done!: ChatDoneEvent
-    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const streamFn: StreamChatCompletionFn = async () => ({ content: '回答', usage: null })
     const { service, project } = setup(streamFn, settled)
 
     const result = await service.send({
@@ -201,7 +224,7 @@ describe('对话服务（节点模型）', () => {
   })
 
   it('父节点不属于该项目时抛出错误', async () => {
-    const streamFn: StreamChatCompletionFn = async () => '回答'
+    const streamFn: StreamChatCompletionFn = async () => ({ content: '回答', usage: null })
     const { service, project } = setup(streamFn)
     const other = createProjectRepository(handle.db).create({ name: 'Q' })
 

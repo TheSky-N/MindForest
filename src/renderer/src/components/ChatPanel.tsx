@@ -1,10 +1,45 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowRightToLine, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  ArrowRightToLine,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Pencil,
+  RefreshCw,
+  Trash2
+} from 'lucide-react'
 import { Virtuoso } from 'react-virtuoso'
-import type { NodePathEntry } from '@shared/types'
+import type { HistoryExportFormat, NodePathEntry } from '@shared/types'
 import { useAppStore } from '../stores/appStore'
 import { Markdown } from './Markdown'
 import { CardShell } from './layout/CardShell'
+
+const COMPOSER_HEIGHT_KEY = 'mindforest.composer.height'
+const COMPOSER_MIN_HEIGHT = 48
+const COMPOSER_DEFAULT_HEIGHT = 64
+
+function clampComposerHeight(height: number): number {
+  const max = Math.max(160, Math.round(window.innerHeight * 0.6))
+  return Math.min(Math.max(Math.round(height), COMPOSER_MIN_HEIGHT), max)
+}
+
+function readStoredComposerHeight(): number {
+  try {
+    const raw = Number(localStorage.getItem(COMPOSER_HEIGHT_KEY))
+    if (Number.isFinite(raw) && raw > 0) return clampComposerHeight(raw)
+  } catch {
+    void 0
+  }
+  return COMPOSER_DEFAULT_HEIGHT
+}
+
+function persistComposerHeight(height: number): void {
+  try {
+    localStorage.setItem(COMPOSER_HEIGHT_KEY, String(height))
+  } catch {
+    void 0
+  }
+}
 
 interface QuoteSelection {
   nodeId: string
@@ -16,6 +51,16 @@ interface QuoteSelection {
 function truncate(text: string, length = 18): string {
   const trimmed = text.replace(/\s+/g, ' ').trim()
   return trimmed.length > length ? `${trimmed.slice(0, length)}…` : trimmed
+}
+
+function answerPreview(text: string, length = 80): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.length > length ? `${compact.slice(0, length)}…` : compact
+}
+
+function formatTokenCount(value: number | null): string {
+  if (value === null) return '?'
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value)
 }
 
 function NodeTurn({
@@ -36,6 +81,7 @@ function NodeTurn({
   const regenerate = useAppStore((state) => state.regenerate)
   const deleteNode = useAppStore((state) => state.deleteNode)
   const editNode = useAppStore((state) => state.editNode)
+  const toggleAnswerCollapsed = useAppStore((state) => state.toggleAnswerCollapsed)
   const groupCount = useAppStore(
     (state) =>
       entry.turnGroupId
@@ -90,6 +136,14 @@ function NodeTurn({
   }
 
   const assistantContent = streaming ? streamContent : entry.assistantContent
+  const hasAnswer = assistantContent.trim().length > 0
+  const folded = !streaming && entry.answerCollapsed && hasAnswer
+  const hasTokens = !streaming && (entry.promptTokens !== null || entry.completionTokens !== null)
+  const tokenTitle = hasTokens
+    ? `输入 ${entry.promptTokens ?? '未知'} tok · 输出 ${entry.completionTokens ?? '未知'} tok · 合计 ${
+        (entry.promptTokens ?? 0) + (entry.completionTokens ?? 0)
+      } tok`
+    : ''
 
   return (
     <div className="group flex flex-col">
@@ -155,40 +209,77 @@ function NodeTurn({
         onMouseUp={handleMouseUp}
         className="mt-1 w-full rounded-lg border border-border/60 bg-bubble-ai px-4 py-3 text-sm text-fg"
       >
-        {assistantContent ? (
-          <Markdown content={assistantContent} streaming={streaming} />
+        {folded ? (
+          <button
+            type="button"
+            title="展开回答"
+            onClick={() => void toggleAnswerCollapsed(entry.id)}
+            className="flex w-full items-center gap-2 text-left"
+          >
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />
+            <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">
+              {answerPreview(assistantContent)}
+            </span>
+            <span className="shrink-0 text-[10px] text-fg-subtle">
+              已折叠 · {assistantContent.length} 字
+            </span>
+          </button>
         ) : (
-          <span className="text-xs text-fg-subtle">
-            {streaming ? '正在生成…' : '（空回复）'}
-          </span>
-        )}
-        {entry.assistantStatus === 'error' && entry.assistantError && (
-          <p className="mt-2 text-xs text-danger">生成失败：{entry.assistantError}</p>
-        )}
-        {entry.assistantStatus === 'aborted' && (
-          <p className="mt-2 text-xs text-warning">已停止生成</p>
+          <>
+            {!streaming && hasAnswer && (
+              <div className="-mt-1 -mr-1 mb-1 flex justify-end">
+                <button
+                  type="button"
+                  title="折叠回答"
+                  onClick={() => void toggleAnswerCollapsed(entry.id)}
+                  className="rounded p-0.5 text-fg-subtle hover:bg-card-muted hover:text-fg"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+            {assistantContent ? (
+              <Markdown content={assistantContent} streaming={streaming} />
+            ) : (
+              <span className="text-xs text-fg-subtle">
+                {streaming ? '正在生成…' : '（空回复）'}
+              </span>
+            )}
+            {entry.assistantStatus === 'error' && entry.assistantError && (
+              <p className="mt-2 text-xs text-danger">生成失败：{entry.assistantError}</p>
+            )}
+            {entry.assistantStatus === 'aborted' && (
+              <p className="mt-2 text-xs text-warning">已停止生成</p>
+            )}
+          </>
         )}
       </div>
 
-      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">
-        <span>{truncate(entry.userContent, 12)}</span>
+      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-subtle">
         {versionLabel && (
           <span className="rounded bg-card-muted px-1 text-fg-muted">{versionLabel}</span>
         )}
         {entry.model && <span>{entry.model}</span>}
-        {focused && (
-          <>
-            {!streaming && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void regenerate(entry.id)}
-                className="flex items-center gap-0.5 hover:enabled:text-accent disabled:opacity-30"
-              >
-                <RefreshCw className="h-3 w-3" />
-                重新生成
-              </button>
-            )}
+        {hasTokens && (
+          <span title={tokenTitle}>
+            ↑{formatTokenCount(entry.promptTokens)} ↓{formatTokenCount(entry.completionTokens)} tok
+          </span>
+        )}
+        <span className="min-w-0 flex-1" />
+        <div className="flex min-w-0 items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="truncate">{truncate(entry.userContent, 12)}</span>
+          {focused && !streaming && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void regenerate(entry.id)}
+              className="flex items-center gap-0.5 hover:enabled:text-accent disabled:opacity-30"
+            >
+              <RefreshCw className="h-3 w-3" />
+              重新生成
+            </button>
+          )}
+          {focused && (
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -197,22 +288,22 @@ function NodeTurn({
               <Pencil className="h-3 w-3" />
               编辑
             </button>
-            {entry.parentId && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm('删除该节点及其整个子树？可在回收站中恢复。')) {
-                    void deleteNode(entry.id)
-                  }
-                }}
-                className="flex items-center gap-0.5 hover:text-danger"
-              >
-                <Trash2 className="h-3 w-3" />
-                删除节点
-              </button>
-            )}
-          </>
-        )}
+          )}
+          {focused && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('删除该节点及其整个子树？可在回收站中恢复。')) {
+                  void deleteNode(entry.id)
+                }
+              }}
+              className="flex items-center gap-0.5 hover:text-danger"
+            >
+              <Trash2 className="h-3 w-3" />
+              删除节点
+            </button>
+          )}
+        </div>
       </div>
 
       {selection && (
@@ -333,9 +424,11 @@ function Composer() {
   const cancelStream = useAppStore((state) => state.cancelStream)
   const enterFromPreview = useAppStore((state) => state.enterFromPreview)
   const [value, setValue] = useState('')
+  const [inputHeight, setInputHeight] = useState(readStoredComposerHeight)
+  const dragState = useRef<{ startY: number; startHeight: number } | null>(null)
 
   const isPreviewOnly = Boolean(previewNodeId && previewNodeId !== activeNodeId)
-  const isFirstMessage = nodes.length === 0 && !activeNodeId
+  const isFirstMessage = nodes.filter((node) => !node.deletedAt).length === 0 && !activeNodeId
   const disabled =
     !activeProjectId || !!streaming || busy || isPreviewOnly || value.trim().length === 0
 
@@ -346,9 +439,45 @@ function Composer() {
     void sendMessage(content)
   }
 
+  const startResize = (event: ReactMouseEvent) => {
+    event.preventDefault()
+    dragState.current = { startY: event.clientY, startHeight: inputHeight }
+    const onMove = (moveEvent: MouseEvent) => {
+      const drag = dragState.current
+      if (!drag) return
+      setInputHeight(clampComposerHeight(drag.startHeight - (moveEvent.clientY - drag.startY)))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      dragState.current = null
+      setInputHeight((current) => {
+        const next = clampComposerHeight(current)
+        persistComposerHeight(next)
+        return next
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  const resetHeight = () => {
+    const next = clampComposerHeight(COMPOSER_DEFAULT_HEIGHT)
+    setInputHeight(next)
+    persistComposerHeight(next)
+  }
+
   return (
     <div className="border-t border-border bg-card-muted/30 px-4 py-3">
       <div className="mx-auto max-w-3xl">
+        <div
+          onMouseDown={startResize}
+          onDoubleClick={resetHeight}
+          title="拖动调整输入框高度，双击恢复默认"
+          className="group/resize -mt-2 mb-1 flex h-3 cursor-row-resize items-center justify-center"
+        >
+          <div className="h-1 w-12 rounded-full bg-border transition-colors group-hover/resize:bg-accent/70" />
+        </div>
         {!activeProfile && (
           <p className="mb-2 text-[11px] text-warning">
             还没有启用模型，请先在「设置 → 模型」（Ctrl+K）里添加并启用一个模型配置。
@@ -390,7 +519,7 @@ function Composer() {
         )}
         <div className="flex items-end gap-2">
           <textarea
-            rows={2}
+            style={{ height: inputHeight }}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
@@ -437,10 +566,27 @@ export function ChatPanel() {
   const previewNodeId = useAppStore((state) => state.previewNodeId)
   const activeNodeId = useAppStore((state) => state.activeNodeId)
   const enterFromPreview = useAppStore((state) => state.enterFromPreview)
+  const saveHistory = useAppStore((state) => state.saveHistory)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportNotice, setExportNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!exportNotice) return
+    const timer = window.setTimeout(() => setExportNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [exportNotice])
 
   const project = projects.find((item) => item.id === activeProjectId)
   const focused = pathNodes.find((entry) => entry.id === (previewNodeId ?? activeNodeId))
   const isPreviewOnly = Boolean(previewNodeId && previewNodeId !== activeNodeId)
+
+  const runExport = async (format: HistoryExportFormat) => {
+    setExportOpen(false)
+    const result = await saveHistory(format)
+    if (result && !result.canceled && result.filePath) {
+      setExportNotice(`已导出到 ${result.filePath}`)
+    }
+  }
 
   if (!activeProjectId) {
     return (
@@ -474,9 +620,46 @@ export function ChatPanel() {
               进入并继续
             </button>
           )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setExportOpen((open) => !open)}
+              className="flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-fg-muted hover:bg-card-muted"
+            >
+              <Download className="h-3 w-3" />
+              导出
+            </button>
+            {exportOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
+                <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover py-1 text-xs shadow-xl">
+                  <button
+                    type="button"
+                    disabled={!focused}
+                    onClick={() => void runExport('markdown')}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-fg-muted hover:bg-card-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    当前路径 → Markdown
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runExport('json')}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-fg-muted hover:bg-card-muted"
+                  >
+                    整个项目 → JSON
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </>
       }
     >
+      {exportNotice && (
+        <div className="break-all border-b border-border bg-accent/10 px-4 py-1.5 text-[11px] text-accent">
+          {exportNotice}
+        </div>
+      )}
       <PathList />
       <Composer />
     </CardShell>

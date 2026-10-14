@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
-import type { DeletedNodeInfo, NodeMeta, TurnNode } from '@shared/types'
+import type { DeletedNodeInfo, NodeMeta, TokenUsage, TurnNode } from '@shared/types'
 import type { AppDatabase } from '../client'
 import { nodes } from '../schema'
 import { newId } from '../ids'
@@ -106,6 +106,9 @@ export function createNodeRepository(db: AppDatabase) {
         isMainBranch,
         isArchived: false,
         isCollapsed: false,
+        answerCollapsed: false,
+        promptTokens: null,
+        completionTokens: null,
         deletedAt: null,
         createdAt: now,
         updatedAt: now
@@ -129,7 +132,12 @@ export function createNodeRepository(db: AppDatabase) {
         .run()
     },
 
-    completeAssistant(id: string, content: string, model?: string | null): TurnNode {
+    completeAssistant(
+      id: string,
+      content: string,
+      model?: string | null,
+      usage?: TokenUsage
+    ): TurnNode {
       const patch: Partial<typeof nodes.$inferInsert> = {
         assistantContent: content,
         assistantStatus: 'complete',
@@ -137,25 +145,39 @@ export function createNodeRepository(db: AppDatabase) {
         updatedAt: new Date()
       }
       if (model !== undefined) patch.model = model
+      if (usage) {
+        patch.promptTokens = usage.promptTokens
+        patch.completionTokens = usage.completionTokens
+      }
       db.update(nodes).set(patch).where(eq(nodes.id, id)).run()
       return repo.getOrThrow(id)
     },
 
-    abortAssistant(id: string, content: string): TurnNode {
-      db.update(nodes)
-        .set({ assistantContent: content, assistantStatus: 'aborted', updatedAt: new Date() })
-        .where(eq(nodes.id, id))
-        .run()
+    abortAssistant(id: string, content: string, usage?: TokenUsage): TurnNode {
+      const patch: Partial<typeof nodes.$inferInsert> = {
+        assistantContent: content,
+        assistantStatus: 'aborted',
+        updatedAt: new Date()
+      }
+      if (usage) {
+        patch.promptTokens = usage.promptTokens
+        patch.completionTokens = usage.completionTokens
+      }
+      db.update(nodes).set(patch).where(eq(nodes.id, id)).run()
       return repo.getOrThrow(id)
     },
 
-    failAssistant(id: string, error: string, content?: string): TurnNode {
+    failAssistant(id: string, error: string, content?: string, usage?: TokenUsage): TurnNode {
       const patch: Partial<typeof nodes.$inferInsert> = {
         assistantStatus: 'error',
         assistantError: error,
         updatedAt: new Date()
       }
       if (content !== undefined) patch.assistantContent = content
+      if (usage) {
+        patch.promptTokens = usage.promptTokens
+        patch.completionTokens = usage.completionTokens
+      }
       db.update(nodes).set(patch).where(eq(nodes.id, id)).run()
       return repo.getOrThrow(id)
     },
@@ -187,6 +209,14 @@ export function createNodeRepository(db: AppDatabase) {
     setCollapsed(id: string, collapsed: boolean): TurnNode {
       db.update(nodes)
         .set({ isCollapsed: collapsed, updatedAt: new Date() })
+        .where(eq(nodes.id, id))
+        .run()
+      return repo.getOrThrow(id)
+    },
+
+    setAnswerCollapsed(id: string, collapsed: boolean): TurnNode {
+      db.update(nodes)
+        .set({ answerCollapsed: collapsed, updatedAt: new Date() })
         .where(eq(nodes.id, id))
         .run()
       return repo.getOrThrow(id)

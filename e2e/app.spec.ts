@@ -34,6 +34,9 @@ test.beforeAll(async () => {
         }
         response.writeHead(200, { 'Content-Type': 'text/event-stream' })
         response.write('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n')
+        response.write(
+          'data: {"choices":[],"usage":{"prompt_tokens":33,"completion_tokens":11,"total_tokens":44}}\n\n'
+        )
         response.end('data: [DONE]\n\n')
       })
       return
@@ -91,12 +94,29 @@ test('完整闭环：首条消息创建根节点，继续创建子节点', async
 
       const nodes = await api.tree.listNodes({ projectId: project.id })
       const firstNode = nodes.find((node) => node.id === first.node.id)
+      const statuses = nodes.map((node) => node.assistantStatus)
+
+      const regenDone = waitDone()
+      const regenerated = await api.chat.regenerate({ nodeId: first.node.id })
+      await regenDone
+      await api.tree.deleteNode({ nodeId: regenerated.node.id })
+      const nodesAfterDelete = await api.tree.listNodes({ projectId: project.id })
+      const deleted = await api.tree.listDeleted({ projectId: project.id })
+      const path = await api.tree.getPath({ nodeId: first.node.id })
+      const firstPathEntry = path.find((node) => node.id === first.node.id)
+
       return {
         projectId: project.id,
         firstId: first.node.id,
         nodeCount: nodes.length,
         firstParent: firstNode ? firstNode.parentId : 'missing',
-        statuses: nodes.map((node) => node.assistantStatus)
+        statuses,
+        promptTokens: firstPathEntry?.promptTokens ?? null,
+        completionTokens: firstPathEntry?.completionTokens ?? null,
+        regeneratedDeleted: deleted.some((item) => item.node.id === regenerated.node.id),
+        originalAlive: nodesAfterDelete.some(
+          (node) => node.id === first.node.id && node.deletedAt === null
+        )
       }
     },
     { port: mockPort }
@@ -105,6 +125,10 @@ test('完整闭环：首条消息创建根节点，继续创建子节点', async
   expect(result.nodeCount).toBe(2)
   expect(result.firstParent).toBeNull()
   expect(result.statuses).toEqual(['complete', 'complete'])
+  expect(result.promptTokens).toBe(33)
+  expect(result.completionTokens).toBe(11)
+  expect(result.regeneratedDeleted).toBe(true)
+  expect(result.originalAlive).toBe(true)
 
   await app.close()
 })
@@ -300,6 +324,95 @@ test('主题对话树：簇折叠、主分支、归档与单击双击', async ()
   await window.waitForSelector('text=进入并继续', { timeout: 5000 })
   await window.keyboard.press('Escape')
   await expect(window.locator('text=归档节点')).toHaveCount(0, { timeout: 5000 })
+
+  await app.close()
+})
+
+test('token 徽标、回答折叠与输入框高度调整', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-chat-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const seeded = await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+
+      const { project } = await api.projects.create({ name: '聊天测试' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const done = waitDone()
+      const first = await api.chat.send({ projectId: project.id, parentId: null, content: '你好' })
+      await done
+      return { projectId: project.id, firstId: first.node.id }
+    },
+    { port: mockPort }
+  )
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  await window.locator(`.react-flow__node[data-id="${seeded.firstId}"]`).click()
+  await window.waitForSelector('text=↑33 ↓11 tok', { timeout: 5000 })
+
+  await window.locator('button[title="折叠回答"]').click()
+  await expect(window.locator('.prose')).toHaveCount(0)
+  await expect(window.locator('text=已折叠')).toHaveCount(1)
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  await window.locator(`.react-flow__node[data-id="${seeded.firstId}"]`).click()
+  await window.waitForSelector('text=已折叠', { timeout: 5000 })
+  await expect(window.locator('.prose')).toHaveCount(0)
+  await window.locator('button[title="展开回答"]').click()
+  await window.waitForSelector('.prose', { timeout: 5000 })
+
+  const handle = window.locator('[title^="拖动调整输入框高度"]')
+  const box = await handle.boundingBox()
+  if (!box) throw new Error('未找到输入框拖拽手柄')
+  const startX = box.x + box.width / 2
+  const startY = box.y + box.height / 2
+  const beforeHeight = await window
+    .locator('textarea')
+    .first()
+    .evaluate((element) => (element as HTMLTextAreaElement).offsetHeight)
+  await window.mouse.move(startX, startY)
+  await window.mouse.down()
+  await window.mouse.move(startX, startY - 80, { steps: 8 })
+  await window.mouse.up()
+  const storedHeight = await window.evaluate(() =>
+    Number(localStorage.getItem('mindforest.composer.height'))
+  )
+  expect(storedHeight).toBeGreaterThan(beforeHeight)
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  const afterReloadHeight = await window
+    .locator('textarea')
+    .first()
+    .evaluate((element) => (element as HTMLTextAreaElement).offsetHeight)
+  expect(Math.abs(afterReloadHeight - storedHeight)).toBeLessThanOrEqual(2)
 
   await app.close()
 })

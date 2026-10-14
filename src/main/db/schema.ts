@@ -145,6 +145,9 @@ export const nodes = sqliteTable(
     isMainBranch: integer('is_main_branch', { mode: 'boolean' }).notNull().default(false),
     isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
     isCollapsed: integer('is_collapsed', { mode: 'boolean' }).notNull().default(false),
+    answerCollapsed: integer('answer_collapsed', { mode: 'boolean' }).notNull().default(false),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
     ...timestamps
   },

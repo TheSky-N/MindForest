@@ -22,6 +22,13 @@
       "when": 1791900596328,
       "tag": "0002_amazing_morgan_stark",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791947277301,
+      "tag": "0003_short_skin",
+      "breakpoints": true
     }
   ]
 }

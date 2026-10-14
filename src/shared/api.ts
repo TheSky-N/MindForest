@@ -6,6 +6,8 @@ import type {
   ChatSendResult,
   ClusterWithMembers,
   DeletedNodeInfo,
+  HistoryExportFormat,
+  HistoryExportResult,
   LlmProfile,
   LlmProfileInput,
   LlmProfileTestResult,
@@ -50,6 +52,7 @@ export interface MindForestApi {
     setMainBranch(input: { nodeId: string }): Promise<TurnNode>
     setArchived(input: { nodeId: string; archived: boolean }): Promise<TurnNode>
     setCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
+    setAnswerCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
     deleteNode(input: { nodeId: string }): Promise<void>
     restoreNode(input: { nodeId: string }): Promise<void>
     purgeNode(input: { nodeId: string }): Promise<void>
@@ -81,5 +84,12 @@ export interface MindForestApi {
     onDelta(callback: (event: ChatDeltaEvent) => void): () => void
     onDone(callback: (event: ChatDoneEvent) => void): () => void
     onError(callback: (event: ChatErrorEvent) => void): () => void
+  }
+  export: {
+    saveHistory(input: {
+      projectId: string
+      nodeId?: string
+      format: HistoryExportFormat
+    }): Promise<HistoryExportResult>
   }
 }

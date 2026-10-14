@@ -6,6 +6,8 @@ import type {
   ChatDoneEvent,
   ChatErrorEvent,
   ClusterWithMembers,
+  HistoryExportFormat,
+  HistoryExportResult,
   LlmProfile,
   LlmProfileInput,
   LlmProfileTestResult,
@@ -75,6 +77,8 @@ interface AppState {
   setMainBranch: (nodeId: string) => Promise<void>
   setArchived: (nodeId: string, archived: boolean) => Promise<void>
   setCollapsed: (nodeId: string, collapsed: boolean) => Promise<void>
+  toggleAnswerCollapsed: (nodeId: string) => Promise<void>
+  saveHistory: (format: HistoryExportFormat) => Promise<HistoryExportResult | null>
   setSelection: (ids: string[]) => void
   toggleNodeSelection: (nodeId: string) => void
   clearSelection: () => void
@@ -117,6 +121,21 @@ function buildMembership(clusters: ClusterWithMembers[]): Record<string, string>
     for (const nodeId of cluster.nodeIds) membership[nodeId] = cluster.id
   }
   return membership
+}
+
+function collectSubtreeIds(nodes: NodeMeta[], rootId: string): Set<string> {
+  const ids = new Set([rootId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const node of nodes) {
+      if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) {
+        ids.add(node.id)
+        changed = true
+      }
+    }
+  }
+  return ids
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -399,7 +418,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteNode: async (nodeId) => {
     try {
       await window.mindforest.tree.deleteNode({ nodeId })
-      const affected = get().pathNodes.some((entry) => entry.id === nodeId)
+      const subtree = collectSubtreeIds(get().nodes, nodeId)
+      const affected = get().pathNodes.some((entry) => subtree.has(entry.id))
       if (affected) set({ previewNodeId: null, activeNodeId: null, pathNodes: [] })
       await get().reloadTree()
       set({ error: null })
@@ -455,6 +475,50 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: null })
     } catch (error) {
       set({ error: errorMessage(error) })
+    }
+  },
+
+  toggleAnswerCollapsed: async (nodeId) => {
+    const entry = get().pathNodes.find((item) => item.id === nodeId)
+    if (!entry) return
+    const collapsed = !entry.answerCollapsed
+    set((state) => ({
+      pathNodes: state.pathNodes.map((item) =>
+        item.id === nodeId ? { ...item, answerCollapsed: collapsed } : item
+      )
+    }))
+    try {
+      await window.mindforest.tree.setAnswerCollapsed({ nodeId, collapsed })
+      set({ error: null })
+    } catch (error) {
+      set((state) => ({
+        pathNodes: state.pathNodes.map((item) =>
+          item.id === nodeId ? { ...item, answerCollapsed: !collapsed } : item
+        ),
+        error: errorMessage(error)
+      }))
+    }
+  },
+
+  saveHistory: async (format) => {
+    const projectId = get().activeProjectId
+    if (!projectId) return null
+    const nodeId = get().previewNodeId ?? get().activeNodeId ?? undefined
+    if (format === 'markdown' && !nodeId) {
+      set({ error: '请先选择一个对话节点再导出' })
+      return null
+    }
+    try {
+      const result = await window.mindforest.export.saveHistory({
+        projectId,
+        nodeId: format === 'markdown' ? nodeId : undefined,
+        format
+      })
+      set({ error: null })
+      return result
+    } catch (error) {
+      set({ error: errorMessage(error) })
+      return null
     }
   },
 

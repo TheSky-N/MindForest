@@ -5,6 +5,7 @@ import type {
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
+  HistoryExportFormat,
   LlmProfile,
   LlmProfileInput,
   MigrationReport,
@@ -26,6 +27,7 @@ import { editNode, purgeNode, restoreNode, softDeleteNode } from '../chat/nodeSe
 import { completeChat } from '../llm/client'
 import { refreshChainDigest } from '../llm/chainSummaryService'
 import { generateClusterSummary } from '../llm/clusterSummaryService'
+import { saveHistoryExport } from '../export/historyExport'
 import { createClusterFromSelection } from '../topics/clusterService'
 
 const MIGRATION_REPORT_KEY = 'migration.v2.report'
@@ -203,6 +205,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   ipcMain.handle(IPC.treeSetCollapsed, (_event, input: { nodeId: string; collapsed: boolean }) =>
     nodes.setCollapsed(input.nodeId, input.collapsed)
   )
+  ipcMain.handle(
+    IPC.treeSetAnswerCollapsed,
+    (_event, input: { nodeId: string; collapsed: boolean }) =>
+      nodes.setAnswerCollapsed(input.nodeId, input.collapsed)
+  )
 
   ipcMain.handle(IPC.treeDeleteNode, (_event, input: { nodeId: string }) => {
     softDeleteNode(db, input.nodeId)
@@ -331,4 +338,10 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   ipcMain.handle(IPC.chatCancel, (_event, input: { requestId: string }) => {
     chatService.cancel(input.requestId)
   })
+
+  ipcMain.handle(
+    IPC.exportSaveHistory,
+    (_event, input: { projectId: string; nodeId?: string; format: HistoryExportFormat }) =>
+      saveHistoryExport(db, input)
+  )
 }

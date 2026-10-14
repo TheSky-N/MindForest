@@ -53,8 +53,7 @@ export function editNode(
 
 export function softDeleteNode(db: AppDatabase, nodeId: string): void {
   const nodeRepo = createNodeRepository(db)
-  const node = nodeRepo.getOrThrow(nodeId)
-  if (!node.parentId) throw new Error('根节点不能删除')
+  nodeRepo.getOrThrow(nodeId)
   const subtreeIds = nodeRepo.collectSubtreeIds(nodeId)
   db.transaction((tx) => {
     const now = new Date()

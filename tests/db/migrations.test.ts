@@ -37,6 +37,9 @@ describe('数据库迁移', () => {
         'is_main_branch',
         'is_archived',
         'is_collapsed',
+        'answer_collapsed',
+        'prompt_tokens',
+        'completion_tokens',
         'deleted_at',
         'assistant_status'
       ])

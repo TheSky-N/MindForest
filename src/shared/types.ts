@@ -21,6 +21,9 @@ export interface TurnNode {
   isMainBranch: boolean
   isArchived: boolean
   isCollapsed: boolean
+  answerCollapsed: boolean
+  promptTokens: number | null
+  completionTokens: number | null
   deletedAt: Date | null
   createdAt: Date
   updatedAt: Date
@@ -40,6 +43,18 @@ export interface NodeMeta {
   isArchived: boolean
   isCollapsed: boolean
   deletedAt: Date | null
+}
+
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+}
+
+export type HistoryExportFormat = 'markdown' | 'json'
+
+export interface HistoryExportResult {
+  canceled: boolean
+  filePath: string | null
 }
 
 export interface NodeQuote {

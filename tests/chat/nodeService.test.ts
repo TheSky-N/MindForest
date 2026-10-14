@@ -62,10 +62,15 @@ describe('节点编辑与删除', () => {
     expect(nodes.getOrThrow(sibling.id).userContent).toBe('统一后的内容')
   })
 
-  it('根节点不能删除，子节点可软删恢复与彻底删除', () => {
+  it('根节点可软删除并进回收站，子节点可恢复与彻底删除', () => {
     const { nodes, root, child, grand } = setup()
 
-    expect(() => softDeleteNode(handle.db, root.id)).toThrow('根节点不能删除')
+    softDeleteNode(handle.db, root.id)
+    expect(nodes.getOrThrow(root.id).deletedAt).not.toBeNull()
+    expect(nodes.countByProject(root.projectId)).toBe(3)
+
+    restoreNode(handle.db, root.id)
+    expect(nodes.getOrThrow(root.id).deletedAt).toBeNull()
 
     softDeleteNode(handle.db, child.id)
     expect(nodes.getOrThrow(child.id).deletedAt).not.toBeNull()
@@ -76,5 +81,24 @@ describe('节点编辑与删除', () => {
     purgeNode(handle.db, child.id)
     expect(nodes.get(child.id)).toBeUndefined()
     expect(nodes.get(grand.id)).toBeUndefined()
+  })
+
+  it('可删除首轮重答产生的平行根节点', () => {
+    const { nodes, root } = setup()
+    const regenerated = nodes.create({
+      projectId: root.projectId,
+      parentId: null,
+      userContent: root.userContent,
+      turnGroupId: 'g-first',
+      isMainBranch: false
+    })
+    nodes.setTurnGroup(root.id, 'g-first')
+
+    softDeleteNode(handle.db, regenerated.id)
+
+    expect(nodes.getOrThrow(regenerated.id).deletedAt).not.toBeNull()
+    expect(nodes.getOrThrow(root.id).deletedAt).toBeNull()
+    const deleted = nodes.listDeleted(root.projectId)
+    expect(deleted.map((item) => item.node.id)).toContain(regenerated.id)
   })
 })
