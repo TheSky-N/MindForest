@@ -9,7 +9,9 @@ import {
 } from 'react'
 import {
   ArrowRightToLine,
+  Check,
   ChevronDown,
+  Copy,
   Download,
   Pencil,
   RefreshCw,
@@ -17,9 +19,15 @@ import {
 } from 'lucide-react'
 import { Virtuoso } from 'react-virtuoso'
 import type { HistoryExportFormat, NodePathEntry } from '@shared/types'
-import { useAppStore } from '../stores/appStore'
+import { useAppStore, EMPTY_TAB, type TabState } from '../stores/appStore'
 import { Markdown } from './Markdown'
 import { CardShell } from './layout/CardShell'
+
+type TabSlice = { tabs: TabState[]; activeTabId: string | null }
+
+function selectActiveTabState(state: TabSlice): TabState {
+  return state.tabs.find((tab) => tab.id === state.activeTabId) ?? EMPTY_TAB
+}
 
 const COMPOSER_HEIGHT_KEY = 'mindforest.composer.height'
 const COMPOSER_MIN_HEIGHT = 48
@@ -105,8 +113,9 @@ function NodeTurn({
   const groupCount = useAppStore(
     (state) =>
       entry.turnGroupId
-        ? state.nodes.filter((node) => node.turnGroupId === entry.turnGroupId && !node.deletedAt)
-            .length
+        ? selectActiveTabState(state).nodes.filter(
+            (node) => node.turnGroupId === entry.turnGroupId && !node.deletedAt
+          ).length
         : 1
   )
   const [editing, setEditing] = useState(false)
@@ -114,8 +123,22 @@ function NodeTurn({
   const [syncGroup, setSyncGroup] = useState(false)
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
   const [userOverflow, setUserOverflow] = useState(false)
+  const [copied, setCopied] = useState<'user' | 'answer' | null>(null)
   const userMeasureRef = useRef<HTMLDivElement | null>(null)
-  const busy = useAppStore((state) => state.streaming !== null)
+  const busy = useAppStore((state) => selectActiveTabState(state).streaming !== null)
+
+  const copyMessage = async (kind: 'user' | 'answer', text: string) => {
+    try {
+      await window.mindforest.app.copyText(text)
+      setCopied(kind)
+      window.setTimeout(
+        () => setCopied((current) => (current === kind ? null : current)),
+        1500
+      )
+    } catch {
+      void 0
+    }
+  }
 
   useEffect(() => {
     setDraft(entry.userContent)
@@ -236,6 +259,20 @@ function NodeTurn({
       ) : (
         <div className="ml-auto w-full max-w-[85%]">
           <div className="relative">
+            <div className="absolute -left-7 top-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                type="button"
+                title="复制消息（Markdown）"
+                onClick={() => void copyMessage('user', entry.userContent)}
+                className="rounded p-0.5 text-fg-subtle hover:bg-card-muted hover:text-accent"
+              >
+                {copied === 'user' ? (
+                  <Check className="h-3.5 w-3.5 text-accent" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
             <div
               ref={userMeasureRef}
               aria-hidden
@@ -248,7 +285,8 @@ function NodeTurn({
               data-user-bubble
               onClick={userFolded ? () => void setUserCollapsed(entry.id, false) : undefined}
               title={userFolded ? '点击展开' : undefined}
-              className={`rounded-lg bg-bubble-user px-3 py-2 text-sm leading-relaxed text-bubble-user-fg ${
+              style={{ fontSize: 'var(--chat-font-size, 14px)' }}
+              className={`rounded-lg bg-bubble-user px-3 py-2 leading-relaxed text-bubble-user-fg ${
                 userFolded ? 'cursor-pointer' : ''
               }`}
             >
@@ -258,7 +296,7 @@ function NodeTurn({
               >
                 {renderUserMarkdown && !userFolded ? (
                   <div className="[&_*]:!text-inherit">
-                    <Markdown content={entry.userContent} />
+                    <Markdown compact content={entry.userContent} />
                   </div>
                 ) : (
                   entry.userContent
@@ -296,29 +334,61 @@ function NodeTurn({
       <div
         onMouseUp={handleMouseUp}
         data-answer
-        className="mt-1 w-full rounded-lg border border-border/60 bg-bubble-ai px-4 py-3 text-sm text-fg"
+        style={{ fontSize: 'var(--chat-font-size, 14px)' }}
+        className="mt-1 w-full rounded-lg border border-border/60 bg-bubble-ai px-4 py-3 leading-relaxed text-fg"
       >
         {folded ? (
-          <button
-            type="button"
+          <div
+            role="button"
+            tabIndex={0}
             title="展开回答"
             onClick={() => void toggleAnswerCollapsed(entry.id)}
-            className="w-full text-left"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void toggleAnswerCollapsed(entry.id)
+            }}
+            className="w-full cursor-pointer text-left"
           >
             <div
-              style={lineClampStyle(foldLines)}
-              className="whitespace-pre-wrap text-xs leading-relaxed text-fg-muted"
+              style={{ ...lineClampStyle(foldLines), fontSize: '0.95em' }}
+              className="whitespace-pre-wrap leading-relaxed text-fg-muted"
             >
               {assistantContent}
             </div>
-            <span className="mt-1 block text-[10px] text-fg-subtle">
-              已折叠 · {foldLines} 行预览 · 点击展开
-            </span>
-          </button>
+            <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-subtle">
+              <span>已折叠 · {foldLines} 行预览 · 点击展开</span>
+              <button
+                type="button"
+                title="复制回答（Markdown）"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void copyMessage('answer', assistantContent)
+                }}
+                className="hover:text-accent"
+              >
+                {copied === 'answer' ? (
+                  <Check className="h-3 w-3 text-accent" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {!streaming && hasAnswer && (
-              <div className="-mt-1 -mr-1 mb-1 flex justify-end">
+              <div className="-mt-1 -mr-1 mb-1 flex justify-end gap-1">
+                <button
+                  type="button"
+                  title="复制回答（Markdown）"
+                  onClick={() => void copyMessage('answer', assistantContent)}
+                  className="rounded p-0.5 text-fg-subtle hover:bg-card-muted hover:text-accent"
+                >
+                  {copied === 'answer' ? (
+                    <Check className="h-3.5 w-3.5 text-accent" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
                 <button
                   type="button"
                   title="折叠回答"
@@ -421,12 +491,12 @@ function NodeTurn({
 }
 
 function PathList() {
-  const pathNodes = useAppStore((state) => state.pathNodes)
-  const previewNodeId = useAppStore((state) => state.previewNodeId)
-  const activeNodeId = useAppStore((state) => state.activeNodeId)
-  const streaming = useAppStore((state) => state.streaming)
-  const streamContent = useAppStore((state) => state.streamContent)
-  const allNodes = useAppStore((state) => state.nodes)
+  const pathNodes = useAppStore((state) => selectActiveTabState(state).pathNodes)
+  const previewNodeId = useAppStore((state) => selectActiveTabState(state).previewNodeId)
+  const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
+  const streaming = useAppStore((state) => selectActiveTabState(state).streaming)
+  const streamContent = useAppStore((state) => selectActiveTabState(state).streamContent)
+  const allNodes = useAppStore((state) => selectActiveTabState(state).nodes)
   const viewMode = useAppStore((state) => state.preferences.chat.viewMode)
   const addPendingQuote = useAppStore((state) => state.addPendingQuote)
 
@@ -542,14 +612,14 @@ function PathList() {
 }
 
 function Composer() {
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
-  const nodes = useAppStore((state) => state.nodes)
-  const activeNodeId = useAppStore((state) => state.activeNodeId)
-  const previewNodeId = useAppStore((state) => state.previewNodeId)
-  const streaming = useAppStore((state) => state.streaming)
+  const activeProjectId = useAppStore((state) => selectActiveTabState(state).projectId || null)
+  const nodes = useAppStore((state) => selectActiveTabState(state).nodes)
+  const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
+  const previewNodeId = useAppStore((state) => selectActiveTabState(state).previewNodeId)
+  const streaming = useAppStore((state) => selectActiveTabState(state).streaming)
   const busy = useAppStore((state) => state.busy)
   const activeProfile = useAppStore((state) => state.profiles.find((profile) => profile.isActive))
-  const pendingQuotes = useAppStore((state) => state.pendingQuotes)
+  const pendingQuotes = useAppStore((state) => selectActiveTabState(state).pendingQuotes)
   const removePendingQuote = useAppStore((state) => state.removePendingQuote)
   const sendMessage = useAppStore((state) => state.sendMessage)
   const cancelStream = useAppStore((state) => state.cancelStream)
@@ -691,11 +761,11 @@ function Composer() {
 }
 
 export function ChatPanel() {
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
+  const activeProjectId = useAppStore((state) => selectActiveTabState(state).projectId || null)
   const projects = useAppStore((state) => state.projects)
-  const pathNodes = useAppStore((state) => state.pathNodes)
-  const previewNodeId = useAppStore((state) => state.previewNodeId)
-  const activeNodeId = useAppStore((state) => state.activeNodeId)
+  const pathNodes = useAppStore((state) => selectActiveTabState(state).pathNodes)
+  const previewNodeId = useAppStore((state) => selectActiveTabState(state).previewNodeId)
+  const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
   const enterFromPreview = useAppStore((state) => state.enterFromPreview)
   const saveHistory = useAppStore((state) => state.saveHistory)
   const [exportOpen, setExportOpen] = useState(false)
@@ -738,7 +808,8 @@ export function ChatPanel() {
           </span>
           {focused && (
             <span className="hidden max-w-72 truncate text-[11px] text-fg-muted md:inline">
-              第 {pathNodes.length} 轮 · {truncate(focused.userContent, 20)}
+              第 {pathNodes.length} 轮 ·{' '}
+              {focused.title?.trim() || truncate(focused.userContent, 20)}
             </span>
           )}
           {isPreviewOnly && (

@@ -1,4 +1,4 @@
-import { app, ipcMain, shell, type WebContents } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, shell, type WebContents } from 'electron'
 import { dirname } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type {
@@ -24,6 +24,7 @@ import { isSecureStorageAvailable } from '../secureStore'
 import { clearApiKey, getApiKey, hasSessionApiKey, storeApiKey } from '../security/apiKeys'
 import { createChatService, type ChatEventSink, type RuntimeProfile } from '../chat/chatService'
 import { editNode, purgeNode, restoreNode, softDeleteNode } from '../chat/nodeService'
+import { generateNodeTitle } from '../chat/nodeTitleService'
 import { completeChat } from '../llm/client'
 import { refreshChainDigest } from '../llm/chainSummaryService'
 import { generateClusterSummary } from '../llm/clusterSummaryService'
@@ -117,6 +118,15 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   }))
 
   ipcMain.handle(IPC.appOpenDataDir, () => shell.openPath(dirname(getDatabasePath())))
+
+  ipcMain.handle(IPC.appSetZoom, (event, input: { scale: number }) => {
+    const percent = Math.min(Math.max(Number(input.scale) || 100, 50), 200)
+    BrowserWindow.fromWebContents(event.sender)?.webContents.setZoomFactor(percent / 100)
+  })
+
+  ipcMain.handle(IPC.appCopyText, (_event, input: { text: string }) => {
+    clipboard.writeText(String(input.text ?? ''))
+  })
 
   ipcMain.handle(IPC.appMigrationReport, (): MigrationReport | null => {
     const raw = settings.get(MIGRATION_REPORT_KEY)
@@ -234,6 +244,21 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     (_event, input: { nodeId: string; content: string; syncGroup?: boolean }) =>
       editNode(db, input)
   )
+
+  ipcMain.handle(
+    IPC.treeRenameNode,
+    (_event, input: { nodeId: string; title: string | null }) =>
+      nodes.renameNode(input.nodeId, input.title)
+  )
+
+  ipcMain.handle(IPC.treeGenerateNodeTitle, async (_event, input: { nodeId: string }) => {
+    const title = await generateNodeTitle({
+      db,
+      nodeId: input.nodeId,
+      profile: resolveTaskProfile()
+    })
+    return nodes.setGeneratedTitle(input.nodeId, title)
+  })
 
   ipcMain.handle(IPC.llmProfilesList, () => profiles.list().map(decorate))
 

@@ -18,13 +18,19 @@ function extractCodeProps(child: ReactNode): {
 
 export const Markdown = memo(function Markdown({
   content,
-  streaming
+  streaming,
+  compact
 }: {
   content: string
   streaming?: boolean
+  compact?: boolean
 }) {
   return (
-    <div className="prose prose-sm max-w-none break-words dark:prose-invert prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-fg-muted prose-code:text-accent prose-headings:text-fg prose-hr:border-border prose-li:text-fg prose-pre:bg-transparent prose-pre:p-0 prose-strong:text-fg prose-table:text-fg">
+    <div
+      className={`mf-markdown prose prose-sm max-w-none break-words dark:prose-invert prose-a:text-accent prose-blockquote:border-accent prose-blockquote:text-fg-muted prose-code:text-accent prose-headings:text-fg prose-hr:border-border prose-li:text-fg prose-pre:bg-transparent prose-pre:p-0 prose-strong:text-fg prose-table:text-fg ${
+        compact ? 'mf-markdown-compact' : ''
+      }`}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}

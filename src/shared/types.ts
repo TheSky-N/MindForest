@@ -12,6 +12,8 @@ export interface TurnNode {
   projectId: string
   parentId: string | null
   userContent: string
+  title: string | null
+  titleGenerated: boolean
   assistantContent: string
   assistantStatus: NodeStatus
   assistantError: string | null
@@ -35,6 +37,8 @@ export interface NodeMeta {
   projectId: string
   parentId: string | null
   userContent: string
+  title: string | null
+  titleGenerated: boolean
   assistantStatus: NodeStatus
   assistantError: string | null
   model: string | null
@@ -170,14 +174,10 @@ export type TreeShapeId = 'rounded' | 'pill' | 'square'
 
 export type TreeEdgeId = 'bezier' | 'smoothstep' | 'straight' | 'step'
 
-export interface TreeNodeStyle {
+export interface TreeRoleStyle {
   background: string
   border: string
   text: string
-  fontFamily: string
-  fontSize: number
-  fontWeight: number
-  opacity: number
 }
 
 export type TreeEdgeDash = 'solid' | 'dashed' | 'dotted'
@@ -188,17 +188,22 @@ export interface TreeEdgeStyle {
   dash: TreeEdgeDash
 }
 
-export interface TreeStylePreferences {
-  root: TreeNodeStyle
-  child: TreeNodeStyle
-  cluster: TreeNodeStyle
-  mainNode: { border: string }
-  currentNode: { border: string }
+export interface TreeThemePalette {
+  other: TreeRoleStyle
+  main: TreeRoleStyle
+  current: TreeRoleStyle
   edges: {
     normal: TreeEdgeStyle
     main: TreeEdgeStyle
     current: TreeEdgeStyle
   }
+}
+
+export interface TreeNodeFont {
+  fontFamily: string
+  fontSize: number
+  fontWeight: number
+  opacity: number
 }
 
 export type ChatViewMode = 'single' | 'path'
@@ -210,11 +215,22 @@ export interface ChatPreferences {
   viewMode: ChatViewMode
 }
 
+export type TabsPosition = 'top' | 'left'
+
+export interface UiPreferences {
+  scale: number
+  baseFontSize: number
+  chatFontSize: number
+  markdownHeadingScale: number
+  tabsPosition: TabsPosition
+}
+
 export interface TreeAppearancePreferences {
   aspect: TreeAspectId
   shape: TreeShapeId
   edge: TreeEdgeId
-  style: TreeStylePreferences
+  palettes: Record<ThemeId, TreeThemePalette>
+  nodeFont: TreeNodeFont
 }
 
 export interface AppPreferences {
@@ -224,20 +240,17 @@ export interface AppPreferences {
   fontCode: string
   tree: TreeAppearancePreferences
   chat: ChatPreferences
+  ui: UiPreferences
 }
 
 export interface TaskPreferences {
   summaryProfileId: string
 }
 
-export const DEFAULT_TREE_NODE_STYLE: TreeNodeStyle = {
+export const DEFAULT_TREE_ROLE_STYLE: TreeRoleStyle = {
   background: '',
   border: '',
-  text: '',
-  fontFamily: '',
-  fontSize: 0,
-  fontWeight: 0,
-  opacity: 100
+  text: ''
 }
 
 export const DEFAULT_TREE_EDGE_STYLE: TreeEdgeStyle = {
@@ -246,24 +259,41 @@ export const DEFAULT_TREE_EDGE_STYLE: TreeEdgeStyle = {
   dash: 'solid'
 }
 
-export const DEFAULT_TREE_STYLE: TreeStylePreferences = {
-  root: { ...DEFAULT_TREE_NODE_STYLE },
-  child: { ...DEFAULT_TREE_NODE_STYLE },
-  cluster: { ...DEFAULT_TREE_NODE_STYLE },
-  mainNode: { border: '' },
-  currentNode: { border: '' },
-  edges: {
-    normal: { ...DEFAULT_TREE_EDGE_STYLE },
-    main: { ...DEFAULT_TREE_EDGE_STYLE },
-    current: { ...DEFAULT_TREE_EDGE_STYLE }
+export const DEFAULT_TREE_NODE_FONT: TreeNodeFont = {
+  fontFamily: '',
+  fontSize: 0,
+  fontWeight: 0,
+  opacity: 100
+}
+
+function emptyTreePalette(): TreeThemePalette {
+  return {
+    other: { ...DEFAULT_TREE_ROLE_STYLE },
+    main: { ...DEFAULT_TREE_ROLE_STYLE },
+    current: { ...DEFAULT_TREE_ROLE_STYLE },
+    edges: {
+      normal: { ...DEFAULT_TREE_EDGE_STYLE },
+      main: { ...DEFAULT_TREE_EDGE_STYLE },
+      current: { ...DEFAULT_TREE_EDGE_STYLE }
+    }
   }
+}
+
+export const DEFAULT_TREE_PALETTES: Record<ThemeId, TreeThemePalette> = {
+  forest: emptyTreePalette(),
+  nord: emptyTreePalette(),
+  gruvbox: emptyTreePalette(),
+  catppuccin: emptyTreePalette(),
+  solarized: emptyTreePalette(),
+  github: emptyTreePalette()
 }
 
 export const DEFAULT_TREE_APPEARANCE: TreeAppearancePreferences = {
   aspect: '3:1',
   shape: 'rounded',
   edge: 'bezier',
-  style: DEFAULT_TREE_STYLE
+  palettes: DEFAULT_TREE_PALETTES,
+  nodeFont: DEFAULT_TREE_NODE_FONT
 }
 
 export const DEFAULT_CHAT_PREFERENCES: ChatPreferences = {
@@ -273,13 +303,22 @@ export const DEFAULT_CHAT_PREFERENCES: ChatPreferences = {
   viewMode: 'single'
 }
 
+export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  scale: 100,
+  baseFontSize: 16,
+  chatFontSize: 14,
+  markdownHeadingScale: 100,
+  tabsPosition: 'top'
+}
+
 export const DEFAULT_PREFERENCES: AppPreferences = {
   mode: 'dark',
   themeId: 'forest',
   fontUi: '',
   fontCode: '',
   tree: DEFAULT_TREE_APPEARANCE,
-  chat: DEFAULT_CHAT_PREFERENCES
+  chat: DEFAULT_CHAT_PREFERENCES,
+  ui: DEFAULT_UI_PREFERENCES
 }
 
 export const DEFAULT_TASK_PREFERENCES: TaskPreferences = {

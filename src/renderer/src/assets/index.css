@@ -20,15 +20,15 @@
   --color-ring: var(--mf-ring);
   --color-danger: var(--mf-danger);
   --color-warning: var(--mf-warning);
-  --color-node-root: var(--mf-node-root-bg);
-  --color-node-root-border: var(--mf-node-root-border);
-  --color-node-root-fg: var(--mf-node-root-fg);
-  --color-node-child: var(--mf-node-child-bg);
-  --color-node-child-border: var(--mf-node-child-border);
-  --color-node-child-fg: var(--mf-node-child-fg);
-  --color-node-branch: var(--mf-node-branch-bg);
-  --color-node-branch-border: var(--mf-node-branch-border);
-  --color-node-branch-fg: var(--mf-node-branch-fg);
+  --color-tree-main: var(--mf-tree-main-bg);
+  --color-tree-main-border: var(--mf-tree-main-border);
+  --color-tree-main-fg: var(--mf-tree-main-fg);
+  --color-tree-other: var(--mf-tree-other-bg);
+  --color-tree-other-border: var(--mf-tree-other-border);
+  --color-tree-other-fg: var(--mf-tree-other-fg);
+  --color-tree-current: var(--mf-tree-current-bg);
+  --color-tree-current-border: var(--mf-tree-current-border);
+  --color-tree-current-fg: var(--mf-tree-current-fg);
   --color-edge: var(--mf-edge);
   --color-canvas-dot: var(--mf-canvas-dot);
   --color-bubble-user: var(--mf-bubble-user-bg);
@@ -68,6 +68,62 @@ kbd {
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.mf-markdown h1,
+.mf-markdown h2,
+.mf-markdown h3,
+.mf-markdown h4,
+.mf-markdown h5,
+.mf-markdown h6 {
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.mf-markdown h1 {
+  font-size: calc(1.3em * var(--md-heading-scale, 1));
+  margin: 0.9em 0 0.45em;
+}
+
+.mf-markdown h2 {
+  font-size: calc(1.18em * var(--md-heading-scale, 1));
+  margin: 0.85em 0 0.4em;
+}
+
+.mf-markdown h3 {
+  font-size: calc(1.08em * var(--md-heading-scale, 1));
+  margin: 0.8em 0 0.35em;
+}
+
+.mf-markdown h4 {
+  font-size: calc(1em * var(--md-heading-scale, 1));
+  margin: 0.75em 0 0.3em;
+}
+
+.mf-markdown h5,
+.mf-markdown h6 {
+  font-size: calc(0.95em * var(--md-heading-scale, 1));
+  margin: 0.7em 0 0.3em;
+}
+
+.mf-markdown :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+.mf-markdown-compact :is(p, ul, ol, blockquote) {
+  margin-block: 0.25em;
+}
+
+.mf-markdown-compact :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 0.4em 0.2em;
+}
+
+.mf-markdown-compact :is(li) {
+  margin-block: 0;
+}
+
+.mf-markdown-compact :is(ul, ol) {
+  padding-inline-start: 1.25em;
 }
 
 .react-flow__controls button {

@@ -19,7 +19,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { TreeEdgeId } from '@shared/types'
-import { useAppStore, useEffectiveMode } from '../stores/appStore'
+import { useAppStore, useEffectiveMode, EMPTY_TAB, type TabState } from '../stores/appStore'
 import {
   buildVisibleTree,
   computeMainPathIds,
@@ -34,6 +34,12 @@ import { DeletedNodesDialog } from './tree/DeletedNodesDialog'
 import { CardShell } from './layout/CardShell'
 
 const nodeTypes = { treeNode: TreeNodeView }
+
+type TabSlice = { tabs: TabState[]; activeTabId: string | null }
+
+function selectActiveTabState(state: TabSlice): TabState {
+  return state.tabs.find((tab) => tab.id === state.activeTabId) ?? EMPTY_TAB
+}
 
 const EDGE_TYPES: Record<TreeEdgeId, string> = {
   bezier: 'default',
@@ -54,19 +60,27 @@ function useCanvasDotColor(): string {
   }, [themeId, mode])
 }
 
+function isEditableTarget(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null
+  if (!target) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+}
+
 function Flow() {
-  const nodes = useAppStore((state) => state.nodes)
-  const clusters = useAppStore((state) => state.clusters)
-  const membership = useAppStore((state) => state.membership)
-  const activeNodeId = useAppStore((state) => state.activeNodeId)
-  const previewNodeId = useAppStore((state) => state.previewNodeId)
-  const pathNodes = useAppStore((state) => state.pathNodes)
-  const selectedNodeIds = useAppStore((state) => state.selectedNodeIds)
+  const nodes = useAppStore((state) => selectActiveTabState(state).nodes)
+  const clusters = useAppStore((state) => selectActiveTabState(state).clusters)
+  const membership = useAppStore((state) => selectActiveTabState(state).membership)
+  const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
+  const previewNodeId = useAppStore((state) => selectActiveTabState(state).previewNodeId)
+  const pathNodes = useAppStore((state) => selectActiveTabState(state).pathNodes)
+  const selectedNodeIds = useAppStore((state) => selectActiveTabState(state).selectedNodeIds)
   const clusterSummarizing = useAppStore((state) => state.clusterSummarizing)
   const notice = useAppStore((state) => state.notice)
   const clearNotice = useAppStore((state) => state.clearNotice)
   const treePreferences = useAppStore((state) => state.preferences.tree)
-  const treeStyle = treePreferences.style
+  const themeId = useAppStore((state) => state.preferences.themeId)
+  const palette = treePreferences.palettes[themeId]
 
   const openNode = useAppStore((state) => state.openNode)
   const setSelection = useAppStore((state) => state.setSelection)
@@ -78,6 +92,8 @@ function Flow() {
   const editNode = useAppStore((state) => state.editNode)
   const createClusterFromSelection = useAppStore((state) => state.createClusterFromSelection)
   const renameCluster = useAppStore((state) => state.renameCluster)
+  const renameNode = useAppStore((state) => state.renameNode)
+  const generateNodeTitle = useAppStore((state) => state.generateNodeTitle)
   const summarizeCluster = useAppStore((state) => state.summarizeCluster)
   const setClusterCollapsed = useAppStore((state) => state.setClusterCollapsed)
   const deleteCluster = useAppStore((state) => state.deleteCluster)
@@ -86,6 +102,9 @@ function Flow() {
   const [menu, setMenu] = useState<{ vnode: VisibleTreeNode; x: number; y: number } | null>(null)
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<{ clusterId: string; value: string } | null>(null)
+  const [renamingNode, setRenamingNode] = useState<{ nodeId: string; value: string } | null>(
+    null
+  )
   const [editing, setEditing] = useState<{
     nodeId: string
     value: string
@@ -94,8 +113,28 @@ function Flow() {
   } | null>(null)
   const [deletedOpen, setDeletedOpen] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
+  const [shiftPressed, setShiftPressed] = useState(false)
   const lastClickRef = useRef<{ id: string; at: number } | null>(null)
   const dotColor = useCanvasDotColor()
+
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (event.key !== 'Shift' || event.isComposing || isEditableTarget(event)) return
+      setShiftPressed(true)
+    }
+    const up = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') setShiftPressed(false)
+    }
+    const reset = () => setShiftPressed(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', reset)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', reset)
+    }
+  }, [])
 
   const nodeSize = useMemo(() => resolveNodeSize(treePreferences.aspect), [treePreferences.aspect])
 
@@ -138,28 +177,28 @@ function Flow() {
           vnode.meta?.id === previewNodeId ||
           Boolean(previewNodeId && vnode.cluster?.nodeIds.includes(previewNodeId))
         const dimmed = !isGroupBox && !mainPathIds.has(vnode.id) && !currentVnodeIds.has(vnode.id)
-        const customRing = !isGroupBox && (preview || active) && Boolean(treeStyle.currentNode.border)
+        const roleName =
+          !isGroupBox && currentVnodeIds.has(vnode.id)
+            ? 'current'
+            : mainPathIds.has(vnode.id)
+              ? 'main'
+              : 'other'
+        const role = palette[roleName]
+        const customRing =
+          !isGroupBox && (preview || active) && Boolean(role.border)
         const style: CSSProperties = {}
         if (!isGroupBox) {
-          const group =
-            vnode.kind === 'cluster'
-              ? treeStyle.cluster
-              : vnode.meta?.parentId
-                ? treeStyle.child
-                : treeStyle.root
-          if (group.background) style.backgroundColor = group.background
-          if (group.border) style.borderColor = group.border
-          if (vnode.isMainBranch && treeStyle.mainNode.border) {
-            style.borderColor = treeStyle.mainNode.border
+          style.backgroundColor = role.background || `var(--mf-tree-${roleName}-bg)`
+          style.borderColor = role.border || `var(--mf-tree-${roleName}-border)`
+          style.color = role.text || `var(--mf-tree-${roleName}-fg)`
+          const font = treePreferences.nodeFont
+          if (font.fontFamily) style.fontFamily = font.fontFamily
+          if (font.fontSize) style.fontSize = `${font.fontSize}px`
+          if (font.fontWeight) style.fontWeight = font.fontWeight
+          if (font.opacity !== 100 && !dimmed && !vnode.isArchived) {
+            style.opacity = font.opacity / 100
           }
-          if (group.text) style.color = group.text
-          if (group.fontFamily) style.fontFamily = group.fontFamily
-          if (group.fontSize) style.fontSize = `${group.fontSize}px`
-          if (group.fontWeight) style.fontWeight = group.fontWeight
-          if (group.opacity !== 100 && !dimmed && !vnode.isArchived) {
-            style.opacity = group.opacity / 100
-          }
-          if (customRing) style.boxShadow = `0 0 0 2px ${treeStyle.currentNode.border}`
+          if (customRing) style.boxShadow = `0 0 0 2px ${role.border}`
         }
         return {
           id: vnode.id,
@@ -199,7 +238,8 @@ function Flow() {
     [
       result,
       treePreferences.shape,
-      treeStyle,
+      treePreferences.nodeFont,
+      palette,
       activeNodeId,
       previewNodeId,
       selectedNodeIds,
@@ -215,7 +255,7 @@ function Flow() {
       result.edges.map((edge) => {
         const onCurrentPath = currentVnodeIds.has(edge.source) && currentVnodeIds.has(edge.target)
         const kind = edge.isMain ? 'main' : onCurrentPath ? 'current' : 'normal'
-        const preference = treeStyle.edges[kind]
+        const preference = palette.edges[kind]
         const defaultWidth = kind === 'main' ? 2.5 : kind === 'current' ? 2 : 1
         const style: CSSProperties = {
           stroke: preference.color || (kind === 'normal' ? 'var(--mf-edge)' : 'var(--mf-accent)'),
@@ -236,7 +276,7 @@ function Flow() {
           style
         }
       }),
-    [result, treePreferences.edge, treeStyle, currentVnodeIds]
+    [result, treePreferences.edge, palette, currentVnodeIds]
   )
 
   useEffect(() => {
@@ -257,9 +297,22 @@ function Flow() {
         edges={rfEdges}
         nodeTypes={nodeTypes}
         onInit={setInstance}
-        onNodeClick={(_event, node) => {
+        onNodeClick={(event, node) => {
           const vnode = result.nodes.find((item) => item.id === node.id)
           if (!vnode) return
+          if (event.ctrlKey || event.metaKey) {
+            const state = useAppStore.getState()
+            const current =
+              state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
+            const members =
+              vnode.kind === 'cluster' && vnode.cluster ? vnode.cluster.nodeIds : [node.id]
+            const allSelected = members.every((id) => current.includes(id))
+            const next = allSelected
+              ? current.filter((id) => !members.includes(id))
+              : Array.from(new Set([...current, ...members]))
+            setSelection(next)
+            return
+          }
           const now = Date.now()
           const last = lastClickRef.current
           const isDoubleClick = Boolean(last && last.id === node.id && now - last.at < 320)
@@ -291,7 +344,9 @@ function Flow() {
               ids.push(node.id)
             }
           }
-          const current = useAppStore.getState().selectedNodeIds
+          const state = useAppStore.getState()
+          const current =
+            state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
           const same =
             current.length === ids.length && ids.every((id, index) => current[index] === id)
           if (!same) setSelection(ids)
@@ -311,10 +366,12 @@ function Flow() {
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
-        selectionOnDrag={selectMode}
-        panOnDrag={selectMode ? [1, 2] : true}
-        selectionKeyCode="Shift"
-        multiSelectionKeyCode={['Control', 'Meta']}
+        selectionOnDrag={selectMode || shiftPressed}
+        panOnDrag={selectMode || shiftPressed ? [1, 2] : true}
+        selectionKeyCode={null}
+        multiSelectionKeyCode={null}
+        zoomActivationKeyCode={null}
+        deleteKeyCode={null}
         onlyRenderVisibleElements
         fitView
         minZoom={0.15}
@@ -430,6 +487,10 @@ function Flow() {
             }
           }}
           onRenameCluster={(clusterId, title) => setRenaming({ clusterId, value: title })}
+          onRename={(vnode) =>
+            setRenamingNode({ nodeId: vnode.id, value: vnode.meta?.title ?? '' })
+          }
+          onGenerateTitle={(vnode) => void generateNodeTitle(vnode.id)}
           onSummarizeCluster={(clusterId) => void summarizeCluster(clusterId)}
           onToggleClusterCollapsed={(clusterId, collapsed) =>
             void setClusterCollapsed(clusterId, collapsed)
@@ -450,6 +511,7 @@ function Flow() {
 
       {renaming && (
         <TreeRenameDialog
+          heading="重命名主题"
           value={renaming.value}
           onChange={(value) => setRenaming({ clusterId: renaming.clusterId, value })}
           onCancel={() => setRenaming(null)}
@@ -457,6 +519,20 @@ function Flow() {
             const trimmed = renaming.value.trim()
             if (trimmed) void renameCluster(renaming.clusterId, trimmed)
             setRenaming(null)
+          }}
+        />
+      )}
+
+      {renamingNode && (
+        <TreeRenameDialog
+          heading="重命名节点"
+          value={renamingNode.value}
+          onChange={(value) => setRenamingNode({ nodeId: renamingNode.nodeId, value })}
+          onCancel={() => setRenamingNode(null)}
+          onConfirm={() => {
+            const trimmed = renamingNode.value.trim()
+            void renameNode(renamingNode.nodeId, trimmed || null)
+            setRenamingNode(null)
           }}
         />
       )}
@@ -504,7 +580,7 @@ function Flow() {
 }
 
 export function TopicTreePanel() {
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
+  const activeProjectId = useAppStore((state) => selectActiveTabState(state).projectId || null)
   const togglePanel = useAppStore((state) => state.togglePanel)
   const [fullscreen, setFullscreen] = useState(false)
 

@@ -39,6 +39,8 @@ describe('数据库迁移', () => {
         'is_collapsed',
         'answer_collapsed',
         'user_collapsed',
+        'title',
+        'title_generated',
         'prompt_tokens',
         'completion_tokens',
         'deleted_at',

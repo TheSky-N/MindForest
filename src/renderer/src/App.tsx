@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAppStore, useEffectiveMode } from './stores/appStore'
 import { TopBar } from './components/TopBar'
+import { TabBar } from './components/layout/TabBar'
 import { ResizableLayout } from './components/layout/ResizableLayout'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 
@@ -23,6 +24,10 @@ export default function App() {
     else root.style.removeProperty('--font-ui')
     if (preferences.fontCode) root.style.setProperty('--font-code', preferences.fontCode)
     else root.style.removeProperty('--font-code')
+    root.style.fontSize = `${preferences.ui.baseFontSize}px`
+    root.style.setProperty('--chat-font-size', `${preferences.ui.chatFontSize}px`)
+    root.style.setProperty('--md-heading-scale', String(preferences.ui.markdownHeadingScale / 100))
+    void window.mindforest.app.setZoom(preferences.ui.scale)
   }, [preferences, effectiveMode])
 
   useEffect(() => {
@@ -35,11 +40,41 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      const mod = event.ctrlKey || event.metaKey
+      if (mod && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setSettingsOpen((open) => !open)
+        return
       }
-      if (event.key === 'Escape') setSettingsOpen(false)
+      if (event.key === 'Escape') {
+        setSettingsOpen(false)
+        return
+      }
+      if (!mod) return
+      const store = useAppStore.getState()
+      const key = event.key.toLowerCase()
+      if (key === 't') {
+        event.preventDefault()
+        void store.newTab()
+        return
+      }
+      if (key === 'w') {
+        event.preventDefault()
+        if (store.activeTabId) void store.closeTab(store.activeTabId)
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        void store.cycleTab(event.shiftKey ? -1 : 1)
+        return
+      }
+      if (/^[1-9]$/.test(event.key)) {
+        const tab = store.tabs[Number(event.key) - 1]
+        if (tab) {
+          event.preventDefault()
+          void store.activateTab(tab.id)
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -64,14 +99,18 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-app text-fg">
       <TopBar onOpenSettings={() => setSettingsOpen(true)} />
-      <div className="min-h-0 flex-1">
-        {initialized ? (
-          <ResizableLayout />
-        ) : (
-          <main className="flex h-full items-center justify-center text-sm text-fg-subtle">
-            正在初始化…
-          </main>
-        )}
+      {preferences.ui.tabsPosition === 'top' && <TabBar orientation="top" />}
+      <div className="flex min-h-0 flex-1">
+        {preferences.ui.tabsPosition === 'left' && <TabBar orientation="left" />}
+        <div className="min-h-0 min-w-0 flex-1">
+          {initialized ? (
+            <ResizableLayout />
+          ) : (
+            <main className="flex h-full items-center justify-center text-sm text-fg-subtle">
+              正在初始化…
+            </main>
+          )}
+        </div>
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>

@@ -132,6 +132,8 @@ export const nodes = sqliteTable(
       onDelete: 'cascade'
     }),
     userContent: text('user_content').notNull(),
+    title: text('title'),
+    titleGenerated: integer('title_generated', { mode: 'boolean' }).notNull().default(false),
     assistantContent: text('assistant_content').notNull().default(''),
     assistantStatus: text('assistant_status', {
       enum: ['streaming', 'complete', 'aborted', 'error']

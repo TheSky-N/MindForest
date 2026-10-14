@@ -25,6 +25,8 @@ export interface MindForestApi {
     getInfo(): Promise<AppInfo>
     openDataDir(): Promise<void>
     migrationReport(): Promise<MigrationReport | null>
+    setZoom(scale: number): Promise<void>
+    copyText(text: string): Promise<void>
   }
   settings: {
     get(input: { key: string }): Promise<string | null>
@@ -66,6 +68,8 @@ export interface MindForestApi {
       content: string
       syncGroup?: boolean
     }): Promise<TurnNode>
+    renameNode(input: { nodeId: string; title: string | null }): Promise<TurnNode>
+    generateNodeTitle(input: { nodeId: string }): Promise<TurnNode>
     onClusterUpdated(callback: (cluster: ClusterWithMembers) => void): () => void
   }
   llmProfiles: {

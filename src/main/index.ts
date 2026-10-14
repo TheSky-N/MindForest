@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { closeDatabase, initDatabase } from './db'
 import { createNodeRepository } from './db/repositories/nodes'
@@ -47,6 +47,7 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.mindforest.app')
+  Menu.setApplicationMenu(null)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

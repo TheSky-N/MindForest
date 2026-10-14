@@ -7,16 +7,19 @@ import type {
   TreeEdgeDash,
   TreeEdgeId,
   TreeEdgeStyle,
-  TreeNodeStyle,
+  TreeNodeFont,
+  TreeRoleStyle,
   TreeShapeId,
-  TreeStylePreferences
+  TreeThemePalette,
+  UiPreferences
 } from '@shared/types'
 import {
   DEFAULT_CHAT_PREFERENCES,
   DEFAULT_PREFERENCES,
   DEFAULT_TREE_APPEARANCE,
   DEFAULT_TREE_EDGE_STYLE,
-  DEFAULT_TREE_NODE_STYLE
+  DEFAULT_TREE_NODE_FONT,
+  DEFAULT_UI_PREFERENCES
 } from '@shared/types'
 
 export interface ThemePalette {
@@ -44,15 +47,15 @@ export const REQUIRED_THEME_TOKENS = [
   'ring',
   'danger',
   'warning',
-  'node-root-bg',
-  'node-root-border',
-  'node-root-fg',
-  'node-child-bg',
-  'node-child-border',
-  'node-child-fg',
-  'node-branch-bg',
-  'node-branch-border',
-  'node-branch-fg',
+  'tree-main-bg',
+  'tree-main-border',
+  'tree-main-fg',
+  'tree-other-bg',
+  'tree-other-border',
+  'tree-other-fg',
+  'tree-current-bg',
+  'tree-current-border',
+  'tree-current-fg',
   'edge',
   'canvas-dot',
   'selection',
@@ -145,7 +148,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 }
 
-function normalizeColor(value: unknown): string {
+export function normalizeColor(value: unknown): string {
   if (typeof value !== 'string') return ''
   const trimmed = value.trim()
   return /^#[0-9a-fA-F]{3,8}$/.test(trimmed) ? trimmed : ''
@@ -156,18 +159,24 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(Math.max(Math.round(value), min), max)
 }
 
-function normalizeNodeStyle(value: unknown): TreeNodeStyle {
+function normalizeRoleStyle(value: unknown): TreeRoleStyle {
   const record = asRecord(value)
   return {
     background: normalizeColor(record.background),
     border: normalizeColor(record.border),
-    text: normalizeColor(record.text),
+    text: normalizeColor(record.text)
+  }
+}
+
+function normalizeNodeFont(value: unknown): TreeNodeFont {
+  const record = asRecord(value)
+  return {
     fontFamily: typeof record.fontFamily === 'string' ? record.fontFamily : '',
     fontSize: record.fontSize === 0 ? 0 : clampNumber(record.fontSize, 9, 24, 0),
     fontWeight: FONT_WEIGHTS.includes(record.fontWeight as number)
       ? (record.fontWeight as number)
       : 0,
-    opacity: clampNumber(record.opacity, 20, 100, DEFAULT_TREE_NODE_STYLE.opacity)
+    opacity: clampNumber(record.opacity, 20, 100, DEFAULT_TREE_NODE_FONT.opacity)
   }
 }
 
@@ -182,23 +191,72 @@ function normalizeEdgeStyle(value: unknown): TreeEdgeStyle {
   }
 }
 
-export function normalizeTreeStyle(value: unknown): TreeStylePreferences {
+export function normalizeTreePalette(value: unknown): TreeThemePalette {
   const record = asRecord(value)
   const edges = asRecord(record.edges)
-  const mainNode = asRecord(record.mainNode)
-  const currentNode = asRecord(record.currentNode)
   return {
-    root: normalizeNodeStyle(record.root),
-    child: normalizeNodeStyle(record.child),
-    cluster: normalizeNodeStyle(record.cluster),
-    mainNode: { border: normalizeColor(mainNode.border) },
-    currentNode: { border: normalizeColor(currentNode.border) },
+    other: normalizeRoleStyle(record.other),
+    main: normalizeRoleStyle(record.main),
+    current: normalizeRoleStyle(record.current),
     edges: {
       normal: normalizeEdgeStyle(edges.normal),
       main: normalizeEdgeStyle(edges.main),
       current: normalizeEdgeStyle(edges.current)
     }
   }
+}
+
+function defaultTreePalettes(): Record<ThemeId, TreeThemePalette> {
+  const result = {} as Record<ThemeId, TreeThemePalette>
+  for (const theme of THEME_IDS) result[theme] = normalizeTreePalette(undefined)
+  return result
+}
+
+interface LegacyTreeMigration {
+  palettes: Record<ThemeId, TreeThemePalette>
+  nodeFont: TreeNodeFont | null
+}
+
+function normalizeTreePalettes(
+  value: unknown,
+  legacyStyle: unknown,
+  activeThemeId: ThemeId
+): LegacyTreeMigration {
+  const record = asRecord(value)
+  const palettes = defaultTreePalettes()
+  for (const theme of THEME_IDS) {
+    if (record[theme] !== undefined) palettes[theme] = normalizeTreePalette(record[theme])
+  }
+
+  const legacy = asRecord(legacyStyle)
+  if (Object.keys(legacy).length === 0) return { palettes, nodeFont: null }
+
+  const child = asRecord(legacy.child)
+  const mainNode = asRecord(legacy.mainNode)
+  const currentNode = asRecord(legacy.currentNode)
+  const edges = asRecord(legacy.edges)
+  const base = palettes[activeThemeId]
+  palettes[activeThemeId] = {
+    other: {
+      background: normalizeColor(child.background),
+      border: normalizeColor(child.border),
+      text: normalizeColor(child.text)
+    },
+    main: { background: '', border: normalizeColor(mainNode.border), text: '' },
+    current: { background: '', border: normalizeColor(currentNode.border), text: '' },
+    edges: {
+      normal: normalizeEdgeStyle(edges.normal ?? base.edges.normal),
+      main: normalizeEdgeStyle(edges.main ?? base.edges.main),
+      current: normalizeEdgeStyle(edges.current ?? base.edges.current)
+    }
+  }
+  const nodeFont = normalizeNodeFont({
+    fontFamily: child.fontFamily,
+    fontSize: child.fontSize,
+    fontWeight: child.fontWeight,
+    opacity: child.opacity
+  })
+  return { palettes, nodeFont }
 }
 
 export function normalizeChatPreferences(value: unknown): ChatPreferences {
@@ -217,12 +275,43 @@ export function normalizeChatPreferences(value: unknown): ChatPreferences {
   }
 }
 
+export function normalizeUiPreferences(value: unknown): UiPreferences {
+  const record = asRecord(value)
+  return {
+    scale: clampNumber(record.scale, 75, 150, DEFAULT_UI_PREFERENCES.scale),
+    baseFontSize: clampNumber(
+      record.baseFontSize,
+      12,
+      20,
+      DEFAULT_UI_PREFERENCES.baseFontSize
+    ),
+    chatFontSize: clampNumber(
+      record.chatFontSize,
+      12,
+      20,
+      DEFAULT_UI_PREFERENCES.chatFontSize
+    ),
+    markdownHeadingScale: clampNumber(
+      record.markdownHeadingScale,
+      80,
+      140,
+      DEFAULT_UI_PREFERENCES.markdownHeadingScale
+    ),
+    tabsPosition: record.tabsPosition === 'left' ? 'left' : 'top'
+  }
+}
+
 export function normalizePreferences(value: unknown): AppPreferences {
   if (typeof value !== 'object' || value === null) {
     return {
       ...DEFAULT_PREFERENCES,
-      tree: { ...DEFAULT_TREE_APPEARANCE, style: normalizeTreeStyle(undefined) },
-      chat: { ...DEFAULT_CHAT_PREFERENCES }
+      tree: {
+        ...DEFAULT_TREE_APPEARANCE,
+        palettes: defaultTreePalettes(),
+        nodeFont: { ...DEFAULT_TREE_NODE_FONT }
+      },
+      chat: { ...DEFAULT_CHAT_PREFERENCES },
+      ui: { ...DEFAULT_UI_PREFERENCES }
     }
   }
   const record = value as Record<string, unknown>
@@ -230,9 +319,16 @@ export function normalizePreferences(value: unknown): AppPreferences {
     typeof record.tree === 'object' && record.tree !== null
       ? (record.tree as Record<string, unknown>)
       : {}
+  const themeId = isThemeId(record.themeId) ? record.themeId : DEFAULT_PREFERENCES.themeId
+  const migration = normalizeTreePalettes(treeRecord.palettes, treeRecord.style, themeId)
+  const nodeFont =
+    treeRecord.nodeFont !== undefined
+      ? normalizeNodeFont(treeRecord.nodeFont)
+      : (migration.nodeFont ?? { ...DEFAULT_TREE_NODE_FONT })
+
   return {
     mode: isColorMode(record.mode) ? record.mode : DEFAULT_PREFERENCES.mode,
-    themeId: isThemeId(record.themeId) ? record.themeId : DEFAULT_PREFERENCES.themeId,
+    themeId,
     fontUi: typeof record.fontUi === 'string' ? record.fontUi : '',
     fontCode: typeof record.fontCode === 'string' ? record.fontCode : '',
     tree: {
@@ -241,8 +337,10 @@ export function normalizePreferences(value: unknown): AppPreferences {
         : DEFAULT_TREE_APPEARANCE.aspect,
       shape: isTreeShape(treeRecord.shape) ? treeRecord.shape : DEFAULT_TREE_APPEARANCE.shape,
       edge: isTreeEdge(treeRecord.edge) ? treeRecord.edge : DEFAULT_TREE_APPEARANCE.edge,
-      style: normalizeTreeStyle(treeRecord.style)
+      palettes: migration.palettes,
+      nodeFont
     },
-    chat: normalizeChatPreferences(record.chat)
+    chat: normalizeChatPreferences(record.chat),
+    ui: normalizeUiPreferences(record.ui)
   }
 }

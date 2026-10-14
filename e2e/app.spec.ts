@@ -24,10 +24,13 @@ test.beforeAll(async () => {
           stream = true
         }
         if (!stream) {
+          const content = body.includes('标题助手')
+            ? '标题：递归入门'
+            : '标题：测试主题\n\n摘要：模拟摘要'
           response.writeHead(200, { 'Content-Type': 'application/json' })
           response.end(
             JSON.stringify({
-              choices: [{ message: { role: 'assistant', content: '标题：测试主题\n\n摘要：模拟摘要' } }]
+              choices: [{ message: { role: 'assistant', content } }]
             })
           )
           return
@@ -383,7 +386,7 @@ test('token 徽标、回答折叠与输入框高度调整', async () => {
   await window.locator(`.react-flow__node[data-id="${seeded.firstId}"]`).click()
   await window.waitForSelector('text=已折叠', { timeout: 5000 })
   await expect(window.locator('[data-answer] .prose')).toHaveCount(0)
-  await window.locator('button[title="展开回答"]').click()
+  await window.locator('[title="展开回答"]').click()
   await window.waitForSelector('[data-answer] .prose', { timeout: 5000 })
 
   const handle = window.locator('[title^="拖动调整输入框高度"]')
@@ -511,9 +514,11 @@ test('单轮查看、Markdown 开关、用户折叠与树样式', async () => {
       aspect: '3:1',
       shape: 'rounded',
       edge: 'bezier',
-      style: {
-        root: { background: '#ff0000' },
-        edges: { main: { color: '#123456' } }
+      palettes: {
+        forest: {
+          current: { background: '#ff0000' },
+          edges: { main: { color: '#123456' } }
+        }
       }
     }
   })
@@ -537,6 +542,231 @@ test('单轮查看、Markdown 开关、用户折叠与树样式', async () => {
     )
   )
   expect(edgeStrokes).toContain('rgb(18, 52, 86)')
+
+  await app.close()
+})
+
+test('多标签页：并行生成、切换恢复与持久化', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-tabs-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      await api.projects.create({ name: '项目A' })
+      await api.projects.create({ name: '项目B' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+    },
+    { port: mockPort }
+  )
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+
+  await expect(window.locator('[data-tab-id]')).toHaveCount(1)
+
+  await window.locator('button:has-text("项目A")').first().click()
+  await window.waitForTimeout(600)
+  await expect(window.locator('[data-tab-id]')).toHaveCount(2)
+
+  const waitDone = () =>
+    window.evaluate(
+      () =>
+        new Promise<boolean>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = (
+            window as unknown as { mindforest: MindForestApi }
+          ).mindforest.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve(true)
+          })
+        })
+    )
+
+  await window.locator('textarea').first().fill('A 问题')
+  const doneA = waitDone()
+  await window.locator('button:has-text("发送")').click()
+
+  await window.locator('[data-tab-id]', { hasText: '项目B' }).first().click()
+  await window.waitForTimeout(300)
+  await window.locator('textarea').first().fill('B 问题')
+  const doneB = waitDone()
+  await window.locator('button:has-text("发送")').click()
+
+  await Promise.all([doneA, doneB])
+  await window.waitForTimeout(600)
+
+  await expect(window.locator('[data-turn-id]').first()).toContainText('B 问题')
+  await expect(window.locator('[data-answer]').first()).toContainText('你好')
+
+  await window.locator('[data-tab-id]', { hasText: '项目A' }).first().click()
+  await window.waitForTimeout(600)
+  await expect(window.locator('[data-turn-id]').first()).toContainText('A 问题')
+  await expect(window.locator('[data-answer]').first()).toContainText('你好')
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+  await expect(window.locator('[data-tab-id]')).toHaveCount(2)
+  await expect(window.locator('[data-tab-id][data-active="true"]')).toHaveCount(1)
+
+  await window.evaluate(async () => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    const raw = await api.settings.get({ key: 'preferences.appearance' })
+    const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    prefs.ui = { tabsPosition: 'left' }
+    await api.settings.set({ key: 'preferences.appearance', value: JSON.stringify(prefs) })
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+  await window.waitForTimeout(900)
+  await expect(window.locator('#tabbar')).toHaveCount(1)
+  await expect(window.locator('#tabbar [data-tab-id]')).toHaveCount(2)
+
+  await app.close()
+})
+
+test('重命名、复制、标点输入与外观设置', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-rename-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const seeded = await window.evaluate(
+    async ({ port }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+      const { project } = await api.projects.create({ name: '重命名测试' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const ids: string[] = []
+      let parentId: string | null = null
+      for (const content of ['用户手动重命名验证', 'AI 标题生成验证', '第三个节点用于配色断言']) {
+        const done = waitDone()
+        const result = await api.chat.send({ projectId: project.id, parentId, content })
+        await done
+        ids.push(result.node.id)
+        parentId = result.node.id
+      }
+      return { ids }
+    },
+    { port: mockPort }
+  )
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
+    .click({ button: 'right' })
+  await window.locator('text=重命名节点').click()
+  await window.locator('input').last().fill('手动标题')
+  await window.locator('button:has-text("保存")').click()
+  await window.waitForTimeout(400)
+  await expect(
+    window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
+  ).toContainText('手动标题')
+
+  await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
+    .click({ button: 'right' })
+  await window.locator('text=AI 生成标题').click()
+  await window.waitForTimeout(900)
+  await expect(
+    window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
+  ).toContainText('递归入门')
+
+  await window.locator('button:has-text("重命名测试")').first().hover()
+  await window.locator('button[title="重命名项目"]').first().click()
+  await window.locator('input').last().fill('改名后的项目')
+  await window.locator('button:has-text("保存")').click()
+  await window.waitForTimeout(400)
+  await expect(window.locator('button:has-text("改名后的项目")').first()).toBeVisible()
+
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click()
+  await window.waitForTimeout(500)
+  await window.locator('button[title="复制回答（Markdown）"]').first().click()
+  await window.waitForTimeout(300)
+  const clipboardText = await app.evaluate(({ clipboard }) => clipboard.readText())
+  expect(clipboardText).toBe('你好')
+
+  await window.locator('textarea').first().focus()
+  const shiftPrevented = window.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const handler = (event: KeyboardEvent) => {
+          if (event.key === 'Shift') {
+            window.removeEventListener('keydown', handler)
+            setTimeout(() => resolve(event.defaultPrevented), 0)
+          }
+        }
+        window.addEventListener('keydown', handler)
+      })
+  )
+  await window.keyboard.press('Shift+Digit9')
+  expect(await shiftPrevented).toBe(false)
+
+  await window.evaluate(async () => {
+    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+    const raw = await api.settings.get({ key: 'preferences.appearance' })
+    const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    prefs.ui = { chatFontSize: 18, baseFontSize: 17 }
+    prefs.tree = {
+      palettes: { forest: { main: { background: '#123456' } } }
+    }
+    await api.settings.set({ key: 'preferences.appearance', value: JSON.stringify(prefs) })
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click()
+  await window.waitForTimeout(500)
+
+  const answerFontSize = await window
+    .locator('[data-answer]')
+    .first()
+    .evaluate((element) => getComputedStyle(element).fontSize)
+  expect(answerFontSize).toBe('18px')
+  const rootFontSize = await window.evaluate(
+    () => document.documentElement.style.fontSize
+  )
+  expect(rootFontSize).toBe('17px')
+  const mainBackground = await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[2]}"] > div`)
+    .first()
+    .evaluate((element) => getComputedStyle(element).backgroundColor)
+  expect(mainBackground).toBe('rgb(18, 52, 86)')
 
   await app.close()
 })

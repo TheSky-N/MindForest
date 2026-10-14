@@ -12,6 +12,8 @@ function meta(partial: Partial<NodeMeta> & { id: string }): NodeMeta {
     projectId: 'p',
     parentId: null,
     userContent: partial.id,
+    title: null,
+    titleGenerated: false,
     assistantStatus: 'complete',
     assistantError: null,
     model: null,
@@ -62,6 +64,22 @@ describe('可见主题对话树（向下）', () => {
     expect(a1.y).toBeGreaterThan(a.y)
     expect(a.x).toBeLessThan(b.x)
     expect(result.edges).toHaveLength(3)
+  })
+
+  it('节点标签优先使用自定义标题', () => {
+    const nodes = baseTree().map((node) =>
+      node.id === 'a' ? { ...node, title: '自定义标题' } : node
+    )
+    const result = buildVisibleTree({ nodes, clusters: [], membership: {} }, SIZE)
+    expect(result.nodes.find((node) => node.id === 'a')!.label).toBe('自定义标题')
+    expect(result.nodes.find((node) => node.id === 'b')!.label).toBe('b')
+  })
+
+  it('普通节点的 vnodeIdByNodeId 提供恒等映射', () => {
+    const result = buildVisibleTree({ nodes: baseTree(), clusters: [], membership: {} }, SIZE)
+    for (const node of baseTree()) {
+      expect(result.vnodeIdByNodeId[node.id]).toBe(node.id)
+    }
   })
 
   it('折叠节点隐藏其后代但自身可见', () => {

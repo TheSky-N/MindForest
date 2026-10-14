@@ -103,6 +103,24 @@ describe('节点仓储', () => {
     expect(nodes.getOrThrow(node.id).userCollapsed).toBeNull()
   })
 
+  it('节点标题可手动重命名与 AI 生成', () => {
+    const { nodes, project } = setup()
+    const node = nodes.create({ projectId: project.id, parentId: null, userContent: 'x' })
+    expect(nodes.getOrThrow(node.id).title).toBeNull()
+
+    const renamed = nodes.renameNode(node.id, ' 我的标题 ')
+    expect(renamed.title).toBe('我的标题')
+    expect(renamed.titleGenerated).toBe(false)
+
+    const generated = nodes.setGeneratedTitle(node.id, 'AI 标题')
+    expect(generated.title).toBe('AI 标题')
+    expect(generated.titleGenerated).toBe(true)
+
+    const cleared = nodes.renameNode(node.id, '   ')
+    expect(cleared.title).toBeNull()
+    expect(cleared.titleGenerated).toBe(false)
+  })
+
   it('同轮分组与遗留 streaming 清理', () => {
     const { nodes, project } = setup()
     const root = nodes.create({ projectId: project.id, parentId: null, userContent: 'q' })

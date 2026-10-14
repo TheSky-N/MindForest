@@ -1,16 +1,22 @@
 import { useState } from 'react'
-import { PanelLeftClose } from 'lucide-react'
+import { PanelLeftClose, Pencil } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { CardShell } from './layout/CardShell'
+import { TreeRenameDialog } from './tree/TreeRenameDialog'
 
 export function Sidebar() {
   const projects = useAppStore((state) => state.projects)
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
+  const tabs = useAppStore((state) => state.tabs)
+  const activeTabId = useAppStore((state) => state.activeTabId)
   const createProject = useAppStore((state) => state.createProject)
-  const selectProject = useAppStore((state) => state.selectProject)
+  const openProjectTab = useAppStore((state) => state.openProjectTab)
   const deleteProject = useAppStore((state) => state.deleteProject)
+  const renameProject = useAppStore((state) => state.renameProject)
   const togglePanel = useAppStore((state) => state.togglePanel)
   const [name, setName] = useState('')
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
+
+  const activeProjectId = tabs.find((tab) => tab.id === activeTabId)?.projectId ?? null
 
   const submit = () => {
     const trimmed = name.trim()
@@ -61,12 +67,20 @@ export function Sidebar() {
               <li key={project.id} className="group flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => void selectProject(project.id)}
+                  onClick={() => void openProjectTab(project.id)}
                   className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-xs ${
                     active ? 'bg-accent/15 text-accent' : 'text-fg-muted hover:bg-card-muted'
                   }`}
                 >
                   {project.name}
+                </button>
+                <button
+                  type="button"
+                  title="重命名项目"
+                  onClick={() => setRenaming({ id: project.id, value: project.name })}
+                  className="hidden rounded px-1 text-fg-subtle hover:text-accent group-hover:block"
+                >
+                  <Pencil className="h-3 w-3" />
                 </button>
                 <button
                   type="button"
@@ -91,6 +105,20 @@ export function Sidebar() {
           提示：右侧主题对话树中，单击预览、双击进入并继续；每发送一条消息都会创建一个子节点。
         </p>
       </div>
+
+      {renaming && (
+        <TreeRenameDialog
+          heading="重命名项目"
+          value={renaming.value}
+          onChange={(value) => setRenaming({ id: renaming.id, value })}
+          onCancel={() => setRenaming(null)}
+          onConfirm={() => {
+            const trimmed = renaming.value.trim()
+            if (trimmed) void renameProject(renaming.id, trimmed)
+            setRenaming(null)
+          }}
+        />
+      )}
     </CardShell>
   )
 }

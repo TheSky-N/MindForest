@@ -219,7 +219,7 @@ export function buildVisibleTree(
     vnodes.set(node.id, {
       id: node.id,
       kind: 'node',
-      label: node.userContent,
+      label: node.title?.trim() || node.userContent,
       depth: depthOf(node),
       x: 0,
       y: 0,
@@ -231,6 +231,7 @@ export function buildVisibleTree(
       isRegenerated: count > 1,
       versionLabel: count > 1 ? `v${index + 1}/${count}` : null
     })
+    if (!vnodeIdByNodeId[node.id]) vnodeIdByNodeId[node.id] = node.id
     vnodeParent.set(node.id, mapParent(node))
   }
 

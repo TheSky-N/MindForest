@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Type,
   Unlink
 } from 'lucide-react'
 import type { VisibleTreeNode } from './layout'
@@ -28,6 +29,8 @@ export interface NodeContextMenuProps {
   onToggleArchive: (vnode: VisibleTreeNode) => void
   onRegenerate: (vnode: VisibleTreeNode) => void
   onEdit: (vnode: VisibleTreeNode) => void
+  onRename: (vnode: VisibleTreeNode) => void
+  onGenerateTitle: (vnode: VisibleTreeNode) => void
   onDelete: (vnode: VisibleTreeNode) => void
   onRenameCluster: (clusterId: string, title: string) => void
   onSummarizeCluster: (clusterId: string) => void
@@ -159,6 +162,16 @@ export function NodeContextMenu(props: NodeContextMenuProps) {
             onClick={run(() => props.onRegenerate(vnode))}
           />
           <MenuItem icon={Pencil} label="编辑消息" onClick={run(() => props.onEdit(vnode))} />
+          <MenuItem
+            icon={Type}
+            label="重命名节点"
+            onClick={run(() => props.onRename(vnode))}
+          />
+          <MenuItem
+            icon={Sparkles}
+            label="AI 生成标题"
+            onClick={run(() => props.onGenerateTitle(vnode))}
+          />
           <div className="my-1 border-t border-border" />
           {selectionCount > 0 && (
             <MenuItem

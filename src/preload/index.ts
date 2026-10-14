@@ -20,7 +20,9 @@ const api: MindForestApi = {
   app: {
     getInfo: () => ipcRenderer.invoke(IPC.appGetInfo),
     openDataDir: () => ipcRenderer.invoke(IPC.appOpenDataDir),
-    migrationReport: () => ipcRenderer.invoke(IPC.appMigrationReport)
+    migrationReport: () => ipcRenderer.invoke(IPC.appMigrationReport),
+    setZoom: (scale) => ipcRenderer.invoke(IPC.appSetZoom, { scale }),
+    copyText: (text) => ipcRenderer.invoke(IPC.appCopyText, { text })
   },
   settings: {
     get: (input) => ipcRenderer.invoke(IPC.settingsGet, input),
@@ -51,6 +53,8 @@ const api: MindForestApi = {
     purgeNode: (input) => ipcRenderer.invoke(IPC.treePurgeNode, input),
     listDeleted: (input) => ipcRenderer.invoke(IPC.treeListDeleted, input),
     editNode: (input) => ipcRenderer.invoke(IPC.treeEditNode, input),
+    renameNode: (input) => ipcRenderer.invoke(IPC.treeRenameNode, input),
+    generateNodeTitle: (input) => ipcRenderer.invoke(IPC.treeGenerateNodeTitle, input),
     onClusterUpdated: (callback: (cluster: ClusterWithMembers) => void) =>
       subscribe(IPC.treeClusterUpdated, callback)
   },

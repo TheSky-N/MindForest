@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { ArchiveRestore, Trash2, X } from 'lucide-react'
 import type { DeletedNodeInfo } from '@shared/types'
-import { useAppStore } from '../../stores/appStore'
+import { useActiveTab, useAppStore } from '../../stores/appStore'
 
 export function DeletedNodesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const activeProjectId = useAppStore((state) => state.activeProjectId)
+  const activeProjectId = useActiveTab().projectId || null
   const restoreNode = useAppStore((state) => state.restoreNode)
   const purgeNode = useAppStore((state) => state.purgeNode)
   const [items, setItems] = useState<DeletedNodeInfo[]>([])

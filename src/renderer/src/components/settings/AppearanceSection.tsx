@@ -4,7 +4,7 @@ import type { ColorMode, TreeAspectId, TreeEdgeId, TreeShapeId } from '@shared/t
 import { useAppStore, useEffectiveMode } from '../../stores/appStore'
 import { THEMES } from '../../theme/palettes'
 import { CODE_FONT_PRESETS, UI_FONT_PRESETS } from '../../theme/fonts'
-import { FontPicker } from './controls'
+import { FontPicker, RangeField } from './controls'
 import { TreeStyleEditor } from './TreeStyleEditor'
 
 const MODES: Array<{ id: ColorMode; label: string }> = [
@@ -70,6 +70,7 @@ export function AppearanceSection() {
   const effectiveMode = useEffectiveMode()
   const [saved, setSaved] = useState(false)
   const tree = preferences.tree
+  const ui = preferences.ui
 
   const pickTheme = (themeId: (typeof THEMES)[number]['id']) => {
     void setPreferences({ themeId })
@@ -96,6 +97,57 @@ export function AppearanceSection() {
               {mode.label}
             </button>
           ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-medium text-fg">界面缩放与字号</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <RangeField
+            label="界面缩放"
+            value={ui.scale}
+            min={75}
+            max={150}
+            format={(value) => `${value}%`}
+            onChange={(scale) => void setPreferences({ ui: { ...ui, scale } })}
+          />
+          <RangeField
+            label="界面基础字号"
+            value={ui.baseFontSize}
+            min={12}
+            max={20}
+            format={(value) => `${value}px`}
+            onChange={(baseFontSize) => void setPreferences({ ui: { ...ui, baseFontSize } })}
+          />
+          <RangeField
+            label="对话正文字号"
+            value={ui.chatFontSize}
+            min={12}
+            max={20}
+            format={(value) => `${value}px`}
+            onChange={(chatFontSize) => void setPreferences({ ui: { ...ui, chatFontSize } })}
+          />
+          <RangeField
+            label="Markdown 标题缩放"
+            value={ui.markdownHeadingScale}
+            min={80}
+            max={140}
+            format={(value) => `${value}%`}
+            onChange={(markdownHeadingScale) =>
+              void setPreferences({ ui: { ...ui, markdownHeadingScale } })
+            }
+          />
+        </div>
+        <div className="mt-3 flex flex-col gap-1.5">
+          <span className="text-[11px] text-fg-muted">标签页位置</span>
+          <Segmented
+            value={ui.tabsPosition}
+            options={[
+              { id: 'top', label: '顶部横排' },
+              { id: 'left', label: '左侧垂直' }
+            ]}
+            onChange={(tabsPosition) => void setPreferences({ ui: { ...ui, tabsPosition } })}
+          />
         </div>
       </section>
 

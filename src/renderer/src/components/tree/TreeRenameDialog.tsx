@@ -4,12 +4,14 @@ export function TreeRenameDialog({
   value,
   onChange,
   onCancel,
-  onConfirm
+  onConfirm,
+  heading = '重命名'
 }: {
   value: string
   onChange: (value: string) => void
   onCancel: () => void
   onConfirm: () => void
+  heading?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -27,7 +29,7 @@ export function TreeRenameDialog({
         className="w-80 rounded-lg border border-border bg-popover p-4 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h3 className="mb-2 text-xs font-medium text-fg">重命名卡片</h3>
+        <h3 className="mb-2 text-xs font-medium text-fg">{heading}</h3>
         <input
           ref={inputRef}
           value={value}

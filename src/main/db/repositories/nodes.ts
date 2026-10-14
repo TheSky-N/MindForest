@@ -41,6 +41,8 @@ export function createNodeRepository(db: AppDatabase) {
           projectId: nodes.projectId,
           parentId: nodes.parentId,
           userContent: nodes.userContent,
+          title: nodes.title,
+          titleGenerated: nodes.titleGenerated,
           assistantStatus: nodes.assistantStatus,
           assistantError: nodes.assistantError,
           model: nodes.model,
@@ -97,6 +99,8 @@ export function createNodeRepository(db: AppDatabase) {
         projectId,
         parentId: input.parentId,
         userContent: input.userContent,
+        title: null,
+        titleGenerated: false,
         assistantContent: '',
         assistantStatus: 'streaming',
         assistantError: null,
@@ -226,6 +230,24 @@ export function createNodeRepository(db: AppDatabase) {
     setUserCollapsed(id: string, collapsed: boolean | null): TurnNode {
       db.update(nodes)
         .set({ userCollapsed: collapsed, updatedAt: new Date() })
+        .where(eq(nodes.id, id))
+        .run()
+      return repo.getOrThrow(id)
+    },
+
+    renameNode(id: string, title: string | null): TurnNode {
+      const trimmed = title?.trim() ?? ''
+      db.update(nodes)
+        .set({ title: trimmed || null, titleGenerated: false, updatedAt: new Date() })
+        .where(eq(nodes.id, id))
+        .run()
+      return repo.getOrThrow(id)
+    },
+
+    setGeneratedTitle(id: string, title: string): TurnNode {
+      const trimmed = title.trim()
+      db.update(nodes)
+        .set({ title: trimmed || null, titleGenerated: true, updatedAt: new Date() })
         .where(eq(nodes.id, id))
         .run()
       return repo.getOrThrow(id)

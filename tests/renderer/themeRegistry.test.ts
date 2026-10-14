@@ -9,7 +9,15 @@ import {
   normalizePreferences
 } from '../../src/renderer/src/theme/palettes'
 import { CODE_FONT_PRESETS, UI_FONT_PRESETS } from '../../src/renderer/src/theme/fonts'
-import { DEFAULT_TREE_APPEARANCE, DEFAULT_TREE_EDGE_STYLE, DEFAULT_TREE_STYLE, DEFAULT_CHAT_PREFERENCES, normalizeTaskPreferences } from '@shared/types'
+import {
+  DEFAULT_TREE_APPEARANCE,
+  DEFAULT_TREE_EDGE_STYLE,
+  DEFAULT_TREE_NODE_FONT,
+  DEFAULT_TREE_PALETTES,
+  DEFAULT_CHAT_PREFERENCES,
+  DEFAULT_UI_PREFERENCES,
+  normalizeTaskPreferences
+} from '@shared/types'
 
 const themesCss = readFileSync(
   resolve(process.cwd(), 'src/renderer/src/assets/themes.css'),
@@ -68,7 +76,8 @@ describe('主题注册表', () => {
       fontUi: '',
       fontCode: '',
       tree: DEFAULT_TREE_APPEARANCE,
-      chat: DEFAULT_CHAT_PREFERENCES
+      chat: DEFAULT_CHAT_PREFERENCES,
+      ui: DEFAULT_UI_PREFERENCES
     })
     expect(normalizePreferences({ mode: 'bad', themeId: 42, fontUi: 7 })).toEqual({
       mode: 'dark',
@@ -76,13 +85,20 @@ describe('主题注册表', () => {
       fontUi: '',
       fontCode: '',
       tree: DEFAULT_TREE_APPEARANCE,
-      chat: DEFAULT_CHAT_PREFERENCES
+      chat: DEFAULT_CHAT_PREFERENCES,
+      ui: DEFAULT_UI_PREFERENCES
     })
     expect(
       normalizePreferences({
         tree: { aspect: '1:1', shape: 'pill', edge: 'step' }
       }).tree
-    ).toEqual({ aspect: '1:1', shape: 'pill', edge: 'step', style: DEFAULT_TREE_STYLE })
+    ).toEqual({
+      aspect: '1:1',
+      shape: 'pill',
+      edge: 'step',
+      palettes: DEFAULT_TREE_PALETTES,
+      nodeFont: DEFAULT_TREE_NODE_FONT
+    })
     expect(
       normalizePreferences({ tree: { aspect: '9:9', shape: 'circle', edge: 'zigzag' } }).tree
     ).toEqual(DEFAULT_TREE_APPEARANCE)
@@ -94,41 +110,101 @@ describe('主题注册表', () => {
     })
   })
 
-  it('树样式与对话偏好归一化', () => {
+  it('树配色与对话偏好归一化（含 v0.2.2 迁移）', () => {
     const normalized = normalizePreferences({
       tree: {
-        style: {
-          root: {
-            background: '#ff0000',
-            border: 'red',
-            fontSize: 99,
-            fontWeight: 550,
-            opacity: 5
-          },
-          mainNode: { border: '#00ff00' },
-          edges: {
-            main: { color: '#123456', width: 99, dash: 'wavy' },
-            normal: { width: 2 }
+        palettes: {
+          forest: {
+            other: { background: '#ff0000', border: 'red' },
+            main: { border: '#00ff00' },
+            edges: {
+              main: { color: '#123456', width: 99, dash: 'wavy' },
+              normal: { width: 2 }
+            }
           }
         }
       },
       chat: { renderUserMarkdown: 'yes', foldLines: 999, viewMode: 'path' }
     })
 
-    expect(normalized.tree.style.root.background).toBe('#ff0000')
-    expect(normalized.tree.style.root.border).toBe('')
-    expect(normalized.tree.style.root.fontSize).toBe(24)
-    expect(normalized.tree.style.root.fontWeight).toBe(0)
-    expect(normalized.tree.style.root.opacity).toBe(20)
-    expect(normalized.tree.style.mainNode.border).toBe('#00ff00')
-    expect(normalized.tree.style.edges.main.color).toBe('#123456')
-    expect(normalized.tree.style.edges.main.width).toBe(8)
-    expect(normalized.tree.style.edges.main.dash).toBe('solid')
-    expect(normalized.tree.style.edges.normal.width).toBe(2)
-    expect(normalized.tree.style.edges.current).toEqual(DEFAULT_TREE_EDGE_STYLE)
+    expect(normalized.tree.palettes.forest.other.background).toBe('#ff0000')
+    expect(normalized.tree.palettes.forest.other.border).toBe('')
+    expect(normalized.tree.palettes.forest.main.border).toBe('#00ff00')
+    expect(normalized.tree.palettes.forest.edges.main.color).toBe('#123456')
+    expect(normalized.tree.palettes.forest.edges.main.width).toBe(8)
+    expect(normalized.tree.palettes.forest.edges.main.dash).toBe('solid')
+    expect(normalized.tree.palettes.forest.edges.normal.width).toBe(2)
+    expect(normalized.tree.palettes.forest.edges.current).toEqual(DEFAULT_TREE_EDGE_STYLE)
+    expect(normalized.tree.palettes.nord).toEqual(DEFAULT_TREE_PALETTES.nord)
     expect(normalized.chat.renderUserMarkdown).toBe(true)
     expect(normalized.chat.foldLines).toBe(50)
     expect(normalized.chat.viewMode).toBe('path')
+
+    const migrated = normalizePreferences({
+      themeId: 'nord',
+      tree: {
+        style: {
+          child: {
+            background: '#ff0000',
+            border: '#111111',
+            fontFamily: '',
+            fontSize: 15,
+            fontWeight: 600,
+            opacity: 80
+          },
+          mainNode: { border: '#00ff00' },
+          currentNode: { border: '#0000ff' },
+          edges: { main: { color: '#123456', width: 4 } }
+        }
+      }
+    })
+    expect(migrated.tree.palettes.nord.other.background).toBe('#ff0000')
+    expect(migrated.tree.palettes.nord.main.border).toBe('#00ff00')
+    expect(migrated.tree.palettes.nord.current.border).toBe('#0000ff')
+    expect(migrated.tree.palettes.nord.edges.main.color).toBe('#123456')
+    expect(migrated.tree.nodeFont.fontSize).toBe(15)
+    expect(migrated.tree.nodeFont.fontWeight).toBe(600)
+    expect(migrated.tree.palettes.forest).toEqual(DEFAULT_TREE_PALETTES.forest)
+
+    const uiNormalized = normalizePreferences({
+      ui: {
+        scale: 500,
+        baseFontSize: 1,
+        chatFontSize: 30,
+        markdownHeadingScale: 0,
+        tabsPosition: 'left'
+      }
+    })
+    expect(uiNormalized.ui).toEqual({
+      scale: 150,
+      baseFontSize: 12,
+      chatFontSize: 20,
+      markdownHeadingScale: 80,
+      tabsPosition: 'left'
+    })
+  })
+
+  it('每套主题的三种节点颜色互不相同', () => {
+    const readVar = (block: string, name: string): string => {
+      const match = new RegExp(`--mf-${name}:\\s*([^;]+);`).exec(block)
+      if (!match) throw new Error(`缺少 --mf-${name}`)
+      return match[1]!.trim().toLowerCase()
+    }
+    for (const theme of THEMES) {
+      for (const mode of ['dark', 'light'] as const) {
+        const block = extractBlock(theme.id, mode)
+        const backgrounds = ['tree-other-bg', 'tree-main-bg', 'tree-current-bg'].map((name) =>
+          readVar(block, name)
+        )
+        const borders = [
+          'tree-other-border',
+          'tree-main-border',
+          'tree-current-border'
+        ].map((name) => readVar(block, name))
+        expect(new Set(backgrounds).size, `${theme.id}/${mode} 背景色重复`).toBe(3)
+        expect(new Set(borders).size, `${theme.id}/${mode} 边框色重复`).toBe(3)
+      }
+    }
   })
 
   it('字体预设非空且包含回退', () => {
