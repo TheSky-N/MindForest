@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { Database, Info, Palette, Server } from 'lucide-react'
+import { Database, Info, MessagesSquare, Palette, Server } from 'lucide-react'
 import { AppearanceSection } from './AppearanceSection'
+import { ChatSection } from './ChatSection'
 import { ModelsSection } from './ModelsSection'
 import { DataSection } from './DataSection'
 import { AboutSection } from './AboutSection'
 
-type SectionId = 'appearance' | 'models' | 'data' | 'about'
+type SectionId = 'appearance' | 'chat' | 'models' | 'data' | 'about'
 
 const SECTIONS: Array<{ id: SectionId; label: string; icon: typeof Palette }> = [
   { id: 'appearance', label: '外观', icon: Palette },
+  { id: 'chat', label: '对话', icon: MessagesSquare },
   { id: 'models', label: '模型', icon: Server },
   { id: 'data', label: '数据', icon: Database },
   { id: 'about', label: '关于', icon: Info }
@@ -54,6 +56,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </aside>
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {section === 'appearance' && <AppearanceSection />}
+          {section === 'chat' && <ChatSection />}
           {section === 'models' && <ModelsSection />}
           {section === 'data' && <DataSection />}
           {section === 'about' && <AboutSection />}

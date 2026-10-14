@@ -3,7 +3,9 @@ import { RotateCcw } from 'lucide-react'
 import type { ColorMode, TreeAspectId, TreeEdgeId, TreeShapeId } from '@shared/types'
 import { useAppStore, useEffectiveMode } from '../../stores/appStore'
 import { THEMES } from '../../theme/palettes'
-import { CODE_FONT_PRESETS, UI_FONT_PRESETS, findFontPreset, type FontPreset } from '../../theme/fonts'
+import { CODE_FONT_PRESETS, UI_FONT_PRESETS } from '../../theme/fonts'
+import { FontPicker } from './controls'
+import { TreeStyleEditor } from './TreeStyleEditor'
 
 const MODES: Array<{ id: ColorMode; label: string }> = [
   { id: 'light', label: '亮色' },
@@ -60,51 +62,6 @@ function Segmented<T extends string>({
   )
 }
 
-function FontPicker({
-  label,
-  presets,
-  value,
-  onChange
-}: {
-  label: string
-  presets: FontPreset[]
-  value: string
-  onChange: (value: string) => void
-}) {
-  const matched = findFontPreset(presets, value)
-  const selected = matched?.id ?? (value ? 'custom' : (presets[0]?.id ?? 'custom'))
-
-  return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] text-fg-muted">{label}</span>
-      <select
-        value={selected}
-        onChange={(event) => {
-          const next = event.target.value
-          if (next === 'custom') return
-          const preset = presets.find((item) => item.id === next)
-          if (preset) onChange(preset.stack)
-        }}
-        className="rounded border border-border bg-app px-2 py-1.5 text-xs outline-none focus:border-accent"
-      >
-        {presets.map((preset) => (
-          <option key={preset.id} value={preset.id}>
-            {preset.label}
-          </option>
-        ))}
-        <option value="custom">自定义…</option>
-      </select>
-      {selected === 'custom' && (
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="如 'Maple Mono', monospace"
-          className="rounded border border-border bg-app px-2 py-1.5 text-xs outline-none focus:border-accent"
-        />
-      )}
-    </label>
-  )
-}
 
 export function AppearanceSection() {
   const preferences = useAppStore((state) => state.preferences)
@@ -210,6 +167,11 @@ export function AppearanceSection() {
             />
           </div>
         </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-medium text-fg">节点与连线样式</h3>
+        <TreeStyleEditor />
       </section>
 
       <section className="grid grid-cols-2 gap-3">

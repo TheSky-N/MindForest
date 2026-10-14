@@ -210,6 +210,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     (_event, input: { nodeId: string; collapsed: boolean }) =>
       nodes.setAnswerCollapsed(input.nodeId, input.collapsed)
   )
+  ipcMain.handle(
+    IPC.treeSetUserCollapsed,
+    (_event, input: { nodeId: string; collapsed: boolean | null }) =>
+      nodes.setUserCollapsed(input.nodeId, input.collapsed)
+  )
 
   ipcMain.handle(IPC.treeDeleteNode, (_event, input: { nodeId: string }) => {
     softDeleteNode(db, input.nodeId)

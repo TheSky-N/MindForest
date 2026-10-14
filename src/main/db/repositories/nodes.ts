@@ -107,6 +107,7 @@ export function createNodeRepository(db: AppDatabase) {
         isArchived: false,
         isCollapsed: false,
         answerCollapsed: false,
+        userCollapsed: null,
         promptTokens: null,
         completionTokens: null,
         deletedAt: null,
@@ -217,6 +218,14 @@ export function createNodeRepository(db: AppDatabase) {
     setAnswerCollapsed(id: string, collapsed: boolean): TurnNode {
       db.update(nodes)
         .set({ answerCollapsed: collapsed, updatedAt: new Date() })
+        .where(eq(nodes.id, id))
+        .run()
+      return repo.getOrThrow(id)
+    },
+
+    setUserCollapsed(id: string, collapsed: boolean | null): TurnNode {
+      db.update(nodes)
+        .set({ userCollapsed: collapsed, updatedAt: new Date() })
         .where(eq(nodes.id, id))
         .run()
       return repo.getOrThrow(id)

@@ -29,6 +29,13 @@
       "when": 1791947277301,
       "tag": "0003_short_skin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791948882670,
+      "tag": "0004_medical_masque",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,7 @@ export interface TurnNode {
   isArchived: boolean
   isCollapsed: boolean
   answerCollapsed: boolean
+  userCollapsed: boolean | null
   promptTokens: number | null
   completionTokens: number | null
   deletedAt: Date | null
@@ -169,10 +170,51 @@ export type TreeShapeId = 'rounded' | 'pill' | 'square'
 
 export type TreeEdgeId = 'bezier' | 'smoothstep' | 'straight' | 'step'
 
+export interface TreeNodeStyle {
+  background: string
+  border: string
+  text: string
+  fontFamily: string
+  fontSize: number
+  fontWeight: number
+  opacity: number
+}
+
+export type TreeEdgeDash = 'solid' | 'dashed' | 'dotted'
+
+export interface TreeEdgeStyle {
+  color: string
+  width: number
+  dash: TreeEdgeDash
+}
+
+export interface TreeStylePreferences {
+  root: TreeNodeStyle
+  child: TreeNodeStyle
+  cluster: TreeNodeStyle
+  mainNode: { border: string }
+  currentNode: { border: string }
+  edges: {
+    normal: TreeEdgeStyle
+    main: TreeEdgeStyle
+    current: TreeEdgeStyle
+  }
+}
+
+export type ChatViewMode = 'single' | 'path'
+
+export interface ChatPreferences {
+  renderUserMarkdown: boolean
+  renderAssistantMarkdown: boolean
+  foldLines: number
+  viewMode: ChatViewMode
+}
+
 export interface TreeAppearancePreferences {
   aspect: TreeAspectId
   shape: TreeShapeId
   edge: TreeEdgeId
+  style: TreeStylePreferences
 }
 
 export interface AppPreferences {
@@ -181,16 +223,54 @@ export interface AppPreferences {
   fontUi: string
   fontCode: string
   tree: TreeAppearancePreferences
+  chat: ChatPreferences
 }
 
 export interface TaskPreferences {
   summaryProfileId: string
 }
 
+export const DEFAULT_TREE_NODE_STYLE: TreeNodeStyle = {
+  background: '',
+  border: '',
+  text: '',
+  fontFamily: '',
+  fontSize: 0,
+  fontWeight: 0,
+  opacity: 100
+}
+
+export const DEFAULT_TREE_EDGE_STYLE: TreeEdgeStyle = {
+  color: '',
+  width: 0,
+  dash: 'solid'
+}
+
+export const DEFAULT_TREE_STYLE: TreeStylePreferences = {
+  root: { ...DEFAULT_TREE_NODE_STYLE },
+  child: { ...DEFAULT_TREE_NODE_STYLE },
+  cluster: { ...DEFAULT_TREE_NODE_STYLE },
+  mainNode: { border: '' },
+  currentNode: { border: '' },
+  edges: {
+    normal: { ...DEFAULT_TREE_EDGE_STYLE },
+    main: { ...DEFAULT_TREE_EDGE_STYLE },
+    current: { ...DEFAULT_TREE_EDGE_STYLE }
+  }
+}
+
 export const DEFAULT_TREE_APPEARANCE: TreeAppearancePreferences = {
   aspect: '3:1',
   shape: 'rounded',
-  edge: 'bezier'
+  edge: 'bezier',
+  style: DEFAULT_TREE_STYLE
+}
+
+export const DEFAULT_CHAT_PREFERENCES: ChatPreferences = {
+  renderUserMarkdown: true,
+  renderAssistantMarkdown: true,
+  foldLines: 10,
+  viewMode: 'single'
 }
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
@@ -198,7 +278,8 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   themeId: 'forest',
   fontUi: '',
   fontCode: '',
-  tree: DEFAULT_TREE_APPEARANCE
+  tree: DEFAULT_TREE_APPEARANCE,
+  chat: DEFAULT_CHAT_PREFERENCES
 }
 
 export const DEFAULT_TASK_PREFERENCES: TaskPreferences = {

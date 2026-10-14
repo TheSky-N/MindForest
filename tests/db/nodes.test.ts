@@ -91,6 +91,18 @@ describe('节点仓储', () => {
     expect(nodes.getOrThrow(node.id).isCollapsed).toBe(true)
   })
 
+  it('用户消息折叠状态支持自动（null）与显式值', () => {
+    const { nodes, project } = setup()
+    const node = nodes.create({ projectId: project.id, parentId: null, userContent: 'x' })
+    expect(nodes.getOrThrow(node.id).userCollapsed).toBeNull()
+    nodes.setUserCollapsed(node.id, true)
+    expect(nodes.getOrThrow(node.id).userCollapsed).toBe(true)
+    nodes.setUserCollapsed(node.id, false)
+    expect(nodes.getOrThrow(node.id).userCollapsed).toBe(false)
+    nodes.setUserCollapsed(node.id, null)
+    expect(nodes.getOrThrow(node.id).userCollapsed).toBeNull()
+  })
+
   it('同轮分组与遗留 streaming 清理', () => {
     const { nodes, project } = setup()
     const root = nodes.create({ projectId: project.id, parentId: null, userContent: 'q' })

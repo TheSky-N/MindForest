@@ -146,6 +146,7 @@ export const nodes = sqliteTable(
     isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
     isCollapsed: integer('is_collapsed', { mode: 'boolean' }).notNull().default(false),
     answerCollapsed: integer('answer_collapsed', { mode: 'boolean' }).notNull().default(false),
+    userCollapsed: integer('user_collapsed', { mode: 'boolean' }),
     promptTokens: integer('prompt_tokens'),
     completionTokens: integer('completion_tokens'),
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
   Layers,
@@ -66,6 +66,7 @@ function Flow() {
   const notice = useAppStore((state) => state.notice)
   const clearNotice = useAppStore((state) => state.clearNotice)
   const treePreferences = useAppStore((state) => state.preferences.tree)
+  const treeStyle = treePreferences.style
 
   const openNode = useAppStore((state) => state.openNode)
   const setSelection = useAppStore((state) => state.setSelection)
@@ -130,6 +131,36 @@ function Flow() {
     () =>
       result.nodes.map((vnode) => {
         const isGroupBox = Boolean(vnode.isGroupBox)
+        const active =
+          vnode.meta?.id === activeNodeId ||
+          Boolean(activeNodeId && vnode.cluster?.nodeIds.includes(activeNodeId))
+        const preview =
+          vnode.meta?.id === previewNodeId ||
+          Boolean(previewNodeId && vnode.cluster?.nodeIds.includes(previewNodeId))
+        const dimmed = !isGroupBox && !mainPathIds.has(vnode.id) && !currentVnodeIds.has(vnode.id)
+        const customRing = !isGroupBox && (preview || active) && Boolean(treeStyle.currentNode.border)
+        const style: CSSProperties = {}
+        if (!isGroupBox) {
+          const group =
+            vnode.kind === 'cluster'
+              ? treeStyle.cluster
+              : vnode.meta?.parentId
+                ? treeStyle.child
+                : treeStyle.root
+          if (group.background) style.backgroundColor = group.background
+          if (group.border) style.borderColor = group.border
+          if (vnode.isMainBranch && treeStyle.mainNode.border) {
+            style.borderColor = treeStyle.mainNode.border
+          }
+          if (group.text) style.color = group.text
+          if (group.fontFamily) style.fontFamily = group.fontFamily
+          if (group.fontSize) style.fontSize = `${group.fontSize}px`
+          if (group.fontWeight) style.fontWeight = group.fontWeight
+          if (group.opacity !== 100 && !dimmed && !vnode.isArchived) {
+            style.opacity = group.opacity / 100
+          }
+          if (customRing) style.boxShadow = `0 0 0 2px ${treeStyle.currentNode.border}`
+        }
         return {
           id: vnode.id,
           type: 'treeNode',
@@ -138,16 +169,12 @@ function Flow() {
             label: vnode.label,
             kind: vnode.kind,
             shape: treePreferences.shape,
-            active:
-              vnode.meta?.id === activeNodeId ||
-              Boolean(activeNodeId && vnode.cluster?.nodeIds.includes(activeNodeId)),
-            preview:
-              vnode.meta?.id === previewNodeId ||
-              Boolean(previewNodeId && vnode.cluster?.nodeIds.includes(previewNodeId)),
+            active,
+            preview,
             selected: vnode.meta
               ? selectedNodeIds.includes(vnode.meta.id)
               : (vnode.cluster?.nodeIds ?? []).some((id) => selectedNodeIds.includes(id)),
-            dimmed: !isGroupBox && !mainPathIds.has(vnode.id) && !currentVnodeIds.has(vnode.id),
+            dimmed,
             mainPath: mainPathIds.has(vnode.id),
             archived: vnode.isArchived,
             collapsed: vnode.isCollapsed,
@@ -156,7 +183,9 @@ function Flow() {
             versionLabel: vnode.versionLabel,
             summarizing: vnode.cluster ? clusterSummarizing.includes(vnode.cluster.id) : false,
             clusterSummary: vnode.cluster?.summary ?? null,
-            groupBox: isGroupBox
+            groupBox: isGroupBox,
+            style: Object.keys(style).length > 0 ? style : null,
+            customRing
           },
           draggable: false,
           connectable: false,
@@ -170,6 +199,7 @@ function Flow() {
     [
       result,
       treePreferences.shape,
+      treeStyle,
       activeNodeId,
       previewNodeId,
       selectedNodeIds,
@@ -184,21 +214,29 @@ function Flow() {
     () =>
       result.edges.map((edge) => {
         const onCurrentPath = currentVnodeIds.has(edge.source) && currentVnodeIds.has(edge.target)
+        const kind = edge.isMain ? 'main' : onCurrentPath ? 'current' : 'normal'
+        const preference = treeStyle.edges[kind]
+        const defaultWidth = kind === 'main' ? 2.5 : kind === 'current' ? 2 : 1
+        const style: CSSProperties = {
+          stroke: preference.color || (kind === 'normal' ? 'var(--mf-edge)' : 'var(--mf-accent)'),
+          strokeWidth: preference.width || defaultWidth
+        }
+        if (preference.dash === 'dashed') {
+          style.strokeDasharray = '5 4'
+        } else if (preference.dash === 'dotted') {
+          style.strokeDasharray = '1.5 3'
+        } else if (edge.isRegenerated && kind === 'normal') {
+          style.strokeDasharray = '4 3'
+        }
         return {
           id: edge.id,
           source: edge.source,
           target: edge.target,
           type: EDGE_TYPES[treePreferences.edge],
-          style: edge.isMain
-            ? { stroke: 'var(--mf-accent)', strokeWidth: 2.5 }
-            : onCurrentPath
-              ? { stroke: 'var(--mf-accent)', strokeWidth: 2 }
-              : edge.isRegenerated
-                ? { stroke: 'var(--mf-edge)', strokeDasharray: '4 3' }
-                : { stroke: 'var(--mf-edge)' }
+          style
         }
       }),
-    [result, treePreferences.edge, currentVnodeIds]
+    [result, treePreferences.edge, treeStyle, currentVnodeIds]
   )
 
   useEffect(() => {

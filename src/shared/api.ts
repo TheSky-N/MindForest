@@ -53,6 +53,10 @@ export interface MindForestApi {
     setArchived(input: { nodeId: string; archived: boolean }): Promise<TurnNode>
     setCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
     setAnswerCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
+    setUserCollapsed(input: {
+      nodeId: string
+      collapsed: boolean | null
+    }): Promise<TurnNode>
     deleteNode(input: { nodeId: string }): Promise<void>
     restoreNode(input: { nodeId: string }): Promise<void>
     purgeNode(input: { nodeId: string }): Promise<void>

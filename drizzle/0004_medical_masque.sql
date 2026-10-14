@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `user_collapsed` integer;

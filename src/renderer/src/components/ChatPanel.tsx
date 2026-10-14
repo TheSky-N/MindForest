@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent
+} from 'react'
 import {
   ArrowRightToLine,
   ChevronDown,
-  ChevronRight,
   Download,
   Pencil,
   RefreshCw,
@@ -41,6 +48,18 @@ function persistComposerHeight(height: number): void {
   }
 }
 
+function lineClampStyle(lines: number): CSSProperties {
+  const lineHeight = 1.625
+  return {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: lines,
+    lineHeight,
+    maxHeight: `${lines * lineHeight}em`,
+    overflow: 'hidden'
+  }
+}
+
 interface QuoteSelection {
   nodeId: string
   text: string
@@ -51,11 +70,6 @@ interface QuoteSelection {
 function truncate(text: string, length = 18): string {
   const trimmed = text.replace(/\s+/g, ' ').trim()
   return trimmed.length > length ? `${trimmed.slice(0, length)}…` : trimmed
-}
-
-function answerPreview(text: string, length = 80): string {
-  const compact = text.replace(/\s+/g, ' ').trim()
-  return compact.length > length ? `${compact.slice(0, length)}…` : compact
 }
 
 function formatTokenCount(value: number | null): string {
@@ -82,6 +96,12 @@ function NodeTurn({
   const deleteNode = useAppStore((state) => state.deleteNode)
   const editNode = useAppStore((state) => state.editNode)
   const toggleAnswerCollapsed = useAppStore((state) => state.toggleAnswerCollapsed)
+  const setUserCollapsed = useAppStore((state) => state.setUserCollapsed)
+  const foldLines = useAppStore((state) => state.preferences.chat.foldLines)
+  const renderUserMarkdown = useAppStore((state) => state.preferences.chat.renderUserMarkdown)
+  const renderAssistantMarkdown = useAppStore(
+    (state) => state.preferences.chat.renderAssistantMarkdown
+  )
   const groupCount = useAppStore(
     (state) =>
       entry.turnGroupId
@@ -93,6 +113,8 @@ function NodeTurn({
   const [draft, setDraft] = useState(entry.userContent)
   const [syncGroup, setSyncGroup] = useState(false)
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
+  const [userOverflow, setUserOverflow] = useState(false)
+  const userMeasureRef = useRef<HTMLDivElement | null>(null)
   const busy = useAppStore((state) => state.streaming !== null)
 
   useEffect(() => {
@@ -105,6 +127,16 @@ function NodeTurn({
     window.addEventListener('scroll', clear, true)
     return () => window.removeEventListener('scroll', clear, true)
   }, [selection])
+
+  useLayoutEffect(() => {
+    const element = userMeasureRef.current
+    if (!element) return
+    const measure = () => setUserOverflow(element.scrollHeight > element.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [entry.userContent, foldLines, editing])
 
   const handleMouseUp = () => {
     if (editing) return
@@ -138,6 +170,8 @@ function NodeTurn({
   const assistantContent = streaming ? streamContent : entry.assistantContent
   const hasAnswer = assistantContent.trim().length > 0
   const folded = !streaming && entry.answerCollapsed && hasAnswer
+  const userFolded =
+    !editing && (entry.userCollapsed === true || (entry.userCollapsed === null && userOverflow))
   const hasTokens = !streaming && (entry.promptTokens !== null || entry.completionTokens !== null)
   const tokenTitle = hasTokens
     ? `输入 ${entry.promptTokens ?? '未知'} tok · 输出 ${entry.completionTokens ?? '未知'} tok · 合计 ${
@@ -146,7 +180,7 @@ function NodeTurn({
     : ''
 
   return (
-    <div className="group flex flex-col">
+    <div className="group flex flex-col" data-turn-id={entry.id}>
       {entry.quotes.length > 0 && (
         <div className="mb-1 flex flex-col items-end gap-1">
           {entry.quotes.map((quote) => (
@@ -200,13 +234,68 @@ function NodeTurn({
           </div>
         </div>
       ) : (
-        <div className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-lg bg-bubble-user px-3 py-2 text-sm leading-relaxed text-bubble-user-fg">
-          {entry.userContent}
+        <div className="ml-auto w-full max-w-[85%]">
+          <div className="relative">
+            <div
+              ref={userMeasureRef}
+              aria-hidden
+              style={lineClampStyle(foldLines)}
+              className="invisible pointer-events-none absolute inset-x-0 top-0 whitespace-pre-wrap px-3 py-2 text-sm leading-relaxed"
+            >
+              {entry.userContent}
+            </div>
+            <div
+              data-user-bubble
+              onClick={userFolded ? () => void setUserCollapsed(entry.id, false) : undefined}
+              title={userFolded ? '点击展开' : undefined}
+              className={`rounded-lg bg-bubble-user px-3 py-2 text-sm leading-relaxed text-bubble-user-fg ${
+                userFolded ? 'cursor-pointer' : ''
+              }`}
+            >
+              <div
+                style={userFolded ? lineClampStyle(foldLines) : undefined}
+                className="whitespace-pre-wrap"
+              >
+                {renderUserMarkdown && !userFolded ? (
+                  <div className="[&_*]:!text-inherit">
+                    <Markdown content={entry.userContent} />
+                  </div>
+                ) : (
+                  entry.userContent
+                )}
+              </div>
+            </div>
+          </div>
+          {(userFolded || userOverflow) && (
+            <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-fg-subtle">
+              {userFolded ? (
+                <>
+                  <span>已折叠 · {foldLines} 行预览</span>
+                  <button
+                    type="button"
+                    onClick={() => void setUserCollapsed(entry.id, false)}
+                    className="hover:text-accent"
+                  >
+                    展开
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void setUserCollapsed(entry.id, true)}
+                  className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
+                >
+                  折叠消息
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       <div
         onMouseUp={handleMouseUp}
+        data-answer
         className="mt-1 w-full rounded-lg border border-border/60 bg-bubble-ai px-4 py-3 text-sm text-fg"
       >
         {folded ? (
@@ -214,14 +303,16 @@ function NodeTurn({
             type="button"
             title="展开回答"
             onClick={() => void toggleAnswerCollapsed(entry.id)}
-            className="flex w-full items-center gap-2 text-left"
+            className="w-full text-left"
           >
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />
-            <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">
-              {answerPreview(assistantContent)}
-            </span>
-            <span className="shrink-0 text-[10px] text-fg-subtle">
-              已折叠 · {assistantContent.length} 字
+            <div
+              style={lineClampStyle(foldLines)}
+              className="whitespace-pre-wrap text-xs leading-relaxed text-fg-muted"
+            >
+              {assistantContent}
+            </div>
+            <span className="mt-1 block text-[10px] text-fg-subtle">
+              已折叠 · {foldLines} 行预览 · 点击展开
             </span>
           </button>
         ) : (
@@ -239,7 +330,11 @@ function NodeTurn({
               </div>
             )}
             {assistantContent ? (
-              <Markdown content={assistantContent} streaming={streaming} />
+              renderAssistantMarkdown ? (
+                <Markdown content={assistantContent} streaming={streaming} />
+              ) : (
+                <div className="whitespace-pre-wrap leading-relaxed">{assistantContent}</div>
+              )
             ) : (
               <span className="text-xs text-fg-subtle">
                 {streaming ? '正在生成…' : '（空回复）'}
@@ -332,13 +427,20 @@ function PathList() {
   const streaming = useAppStore((state) => state.streaming)
   const streamContent = useAppStore((state) => state.streamContent)
   const allNodes = useAppStore((state) => state.nodes)
+  const viewMode = useAppStore((state) => state.preferences.chat.viewMode)
   const addPendingQuote = useAppStore((state) => state.addPendingQuote)
 
   const focusedNodeId = previewNodeId ?? activeNodeId
+  const focusedEntry = pathNodes.find((entry) => entry.id === focusedNodeId)
 
   const data = useMemo(
-    () => pathNodes.filter((entry) => entry.id !== streaming?.nodeId),
-    [pathNodes, streaming]
+    () =>
+      viewMode === 'single'
+        ? focusedEntry && focusedEntry.id !== streaming?.nodeId
+          ? [focusedEntry]
+          : []
+        : pathNodes.filter((entry) => entry.id !== streaming?.nodeId),
+    [viewMode, focusedEntry, pathNodes, streaming]
   )
   const streamingEntry = streaming
     ? pathNodes.find((entry) => entry.id === streaming.nodeId)
@@ -354,10 +456,46 @@ function PathList() {
     return `v${index + 1}/${group.length}`
   }
 
+  const quoteSelection = (selection: QuoteSelection) =>
+    addPendingQuote({ quotedNodeId: selection.nodeId, quoteText: selection.text })
+
   if (pathNodes.length === 0 && !streamingEntry) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 text-center text-xs text-fg-subtle">
-        单击树上的节点可以预览整条对话路径，双击进入并从那里继续。
+        {viewMode === 'single'
+          ? '单击树上的节点可以查看该轮对话，双击进入并从那里继续。'
+          : '单击树上的节点可以预览整条对话路径，双击进入并从那里继续。'}
+      </div>
+    )
+  }
+
+  if (viewMode === 'single') {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {data.map((entry) => (
+          <div key={entry.id} className="mx-auto max-w-3xl px-4 pt-3">
+            <NodeTurn
+              entry={entry}
+              focused={entry.id === focusedNodeId}
+              streaming={false}
+              streamContent=""
+              versionLabel={versionLabelOf(entry)}
+              onQuote={quoteSelection}
+            />
+          </div>
+        ))}
+        {streamingEntry && (
+          <div className="mx-auto max-w-3xl px-4 pb-4 pt-3">
+            <NodeTurn
+              entry={{ ...streamingEntry, assistantContent: '', assistantStatus: 'streaming' }}
+              focused
+              streaming
+              streamContent={streamContent}
+              versionLabel={versionLabelOf(streamingEntry)}
+              onQuote={quoteSelection}
+            />
+          </div>
+        )}
       </div>
     )
   }
@@ -379,9 +517,7 @@ function PathList() {
               streaming={false}
               streamContent=""
               versionLabel={versionLabelOf(entry)}
-              onQuote={(selection) =>
-                addPendingQuote({ quotedNodeId: selection.nodeId, quoteText: selection.text })
-              }
+              onQuote={quoteSelection}
             />
           </div>
         )}
@@ -395,12 +531,7 @@ function PathList() {
                   streaming
                   streamContent={streamContent}
                   versionLabel={versionLabelOf(streamingEntry)}
-                  onQuote={(selection) =>
-                    addPendingQuote({
-                      quotedNodeId: selection.nodeId,
-                      quoteText: selection.text
-                    })
-                  }
+                  onQuote={quoteSelection}
                 />
               </div>
             ) : null

@@ -78,6 +78,7 @@ interface AppState {
   setArchived: (nodeId: string, archived: boolean) => Promise<void>
   setCollapsed: (nodeId: string, collapsed: boolean) => Promise<void>
   toggleAnswerCollapsed: (nodeId: string) => Promise<void>
+  setUserCollapsed: (nodeId: string, collapsed: boolean) => Promise<void>
   saveHistory: (format: HistoryExportFormat) => Promise<HistoryExportResult | null>
   setSelection: (ids: string[]) => void
   toggleNodeSelection: (nodeId: string) => void
@@ -494,6 +495,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => ({
         pathNodes: state.pathNodes.map((item) =>
           item.id === nodeId ? { ...item, answerCollapsed: !collapsed } : item
+        ),
+        error: errorMessage(error)
+      }))
+    }
+  },
+
+  setUserCollapsed: async (nodeId, collapsed) => {
+    const entry = get().pathNodes.find((item) => item.id === nodeId)
+    if (!entry) return
+    const previous = entry.userCollapsed
+    set((state) => ({
+      pathNodes: state.pathNodes.map((item) =>
+        item.id === nodeId ? { ...item, userCollapsed: collapsed } : item
+      )
+    }))
+    try {
+      await window.mindforest.tree.setUserCollapsed({ nodeId, collapsed })
+      set({ error: null })
+    } catch (error) {
+      set((state) => ({
+        pathNodes: state.pathNodes.map((item) =>
+          item.id === nodeId ? { ...item, userCollapsed: previous } : item
         ),
         error: errorMessage(error)
       }))

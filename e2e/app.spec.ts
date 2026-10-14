@@ -373,7 +373,7 @@ test('token 徽标、回答折叠与输入框高度调整', async () => {
   await window.waitForSelector('text=↑33 ↓11 tok', { timeout: 5000 })
 
   await window.locator('button[title="折叠回答"]').click()
-  await expect(window.locator('.prose')).toHaveCount(0)
+  await expect(window.locator('[data-answer] .prose')).toHaveCount(0)
   await expect(window.locator('text=已折叠')).toHaveCount(1)
 
   await window.reload()
@@ -382,9 +382,9 @@ test('token 徽标、回答折叠与输入框高度调整', async () => {
   await window.waitForTimeout(900)
   await window.locator(`.react-flow__node[data-id="${seeded.firstId}"]`).click()
   await window.waitForSelector('text=已折叠', { timeout: 5000 })
-  await expect(window.locator('.prose')).toHaveCount(0)
+  await expect(window.locator('[data-answer] .prose')).toHaveCount(0)
   await window.locator('button[title="展开回答"]').click()
-  await window.waitForSelector('.prose', { timeout: 5000 })
+  await window.waitForSelector('[data-answer] .prose', { timeout: 5000 })
 
   const handle = window.locator('[title^="拖动调整输入框高度"]')
   const box = await handle.boundingBox()
@@ -413,6 +413,130 @@ test('token 徽标、回答折叠与输入框高度调整', async () => {
     .first()
     .evaluate((element) => (element as HTMLTextAreaElement).offsetHeight)
   expect(Math.abs(afterReloadHeight - storedHeight)).toBeLessThanOrEqual(2)
+
+  await app.close()
+})
+
+test('单轮查看、Markdown 开关、用户折叠与树样式', async () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'mindforest-e2e-v022-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userDataDir}`]
+  })
+  const window = await app.firstWindow()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('header')
+
+  const longMessage = Array.from({ length: 14 }, (_, index) => `折叠行 ${index + 1}`).join('\n')
+
+  const seeded = await window.evaluate(
+    async ({ port, longMessage }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const waitDone = () =>
+        new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
+          const off = api.chat.onDone(() => {
+            off()
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+      const { project } = await api.projects.create({ name: 'v022 测试' })
+      await api.llmProfiles.create({
+        name: 'Mock',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'mock-model'
+      })
+      const ids: string[] = []
+      let parentId: string | null = null
+      for (const content of ['## 用户标题\n\n正文一', '第二轮', longMessage]) {
+        const done = waitDone()
+        const result = await api.chat.send({ projectId: project.id, parentId, content })
+        await done
+        ids.push(result.node.id)
+        parentId = result.node.id
+      }
+      return { ids }
+    },
+    { port: mockPort, longMessage }
+  )
+
+  const updatePreferences = (patch: Record<string, unknown>) =>
+    window.evaluate(async (patchValue) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      const raw = await api.settings.get({ key: 'preferences.appearance' })
+      const prefs = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      Object.assign(prefs, patchValue)
+      await api.settings.set({ key: 'preferences.appearance', value: JSON.stringify(prefs) })
+    }, patch)
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click()
+  await window.waitForTimeout(400)
+  await expect(window.locator('[data-turn-id]')).toHaveCount(1)
+  await expect(window.locator('[data-turn-id]').first()).toContainText('第二轮')
+
+  await updatePreferences({ chat: { viewMode: 'path' } })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click()
+  await window.waitForTimeout(400)
+  await expect(window.locator('[data-turn-id]')).toHaveCount(2)
+  await expect(window.locator('h2:has-text("用户标题")')).toHaveCount(1)
+
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[2]}"]`).click()
+  await window.waitForTimeout(500)
+  await expect(window.locator('text=已折叠')).toHaveCount(1)
+  await window.locator('button:has-text("展开")').first().click()
+  await window.waitForTimeout(400)
+  await expect(window.locator('[data-user-bubble]').last()).toContainText('折叠行 14')
+
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[2]}"]`).click()
+  await window.waitForTimeout(500)
+  await expect(window.locator('[data-user-bubble]').last()).toContainText('折叠行 14')
+  await expect(window.locator('text=已折叠')).toHaveCount(0)
+
+  await updatePreferences({
+    chat: { viewMode: 'path', renderUserMarkdown: false },
+    tree: {
+      aspect: '3:1',
+      shape: 'rounded',
+      edge: 'bezier',
+      style: {
+        root: { background: '#ff0000' },
+        edges: { main: { color: '#123456' } }
+      }
+    }
+  })
+  await window.reload()
+  await window.waitForLoadState('domcontentloaded')
+  await window.waitForSelector('.react-flow__node')
+  await window.waitForTimeout(900)
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click()
+  await window.waitForTimeout(400)
+  await expect(window.locator('h2:has-text("用户标题")')).toHaveCount(0)
+
+  const rootBackground = await window
+    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"] > div`)
+    .first()
+    .evaluate((element) => getComputedStyle(element).backgroundColor)
+  expect(rootBackground).toBe('rgb(255, 0, 0)')
+
+  const edgeStrokes = await window.evaluate(() =>
+    Array.from(document.querySelectorAll('.react-flow__edge-path')).map(
+      (element) => getComputedStyle(element).stroke
+    )
+  )
+  expect(edgeStrokes).toContain('rgb(18, 52, 86)')
 
   await app.close()
 })

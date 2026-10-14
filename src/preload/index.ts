@@ -45,6 +45,7 @@ const api: MindForestApi = {
     setArchived: (input) => ipcRenderer.invoke(IPC.treeSetArchived, input),
     setCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetCollapsed, input),
     setAnswerCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetAnswerCollapsed, input),
+    setUserCollapsed: (input) => ipcRenderer.invoke(IPC.treeSetUserCollapsed, input),
     deleteNode: (input) => ipcRenderer.invoke(IPC.treeDeleteNode, input),
     restoreNode: (input) => ipcRenderer.invoke(IPC.treeRestoreNode, input),
     purgeNode: (input) => ipcRenderer.invoke(IPC.treePurgeNode, input),

@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type CSSProperties } from 'react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import {
   AlertCircle,
@@ -28,6 +28,8 @@ export interface TreeNodeData extends Record<string, unknown> {
   summarizing: boolean
   clusterSummary: string | null
   groupBox: boolean
+  style: CSSProperties | null
+  customRing: boolean
 }
 
 export type TreeFlowNodeType = Node<TreeNodeData, 'treeNode'>
@@ -55,6 +57,7 @@ export const TreeNodeView = memo(function TreeNodeView({ data }: NodeProps<TreeF
   return (
     <div
       title={tooltip}
+      style={data.style ?? undefined}
       className={`box-border flex h-full w-full cursor-pointer items-center gap-1 border text-xs shadow-sm ${
         shapeStyles[data.shape]
       } ${
@@ -62,7 +65,7 @@ export const TreeNodeView = memo(function TreeNodeView({ data }: NodeProps<TreeF
           ? 'border-accent/70 bg-accent/15 text-fg'
           : 'border-border bg-card text-fg'
       } ${data.mainPath ? 'border-accent' : ''} ${
-        data.preview || data.active ? 'ring-2 ring-accent' : ''
+        (data.preview || data.active) && !data.customRing ? 'ring-2 ring-accent' : ''
       } ${data.selected ? 'ring-2 ring-warning' : ''} ${
         data.dimmed ? 'opacity-45' : ''
       } ${data.archived ? 'opacity-45' : ''}`}

@@ -9,7 +9,7 @@ import {
   normalizePreferences
 } from '../../src/renderer/src/theme/palettes'
 import { CODE_FONT_PRESETS, UI_FONT_PRESETS } from '../../src/renderer/src/theme/fonts'
-import { DEFAULT_TREE_APPEARANCE, normalizeTaskPreferences } from '@shared/types'
+import { DEFAULT_TREE_APPEARANCE, DEFAULT_TREE_EDGE_STYLE, DEFAULT_TREE_STYLE, DEFAULT_CHAT_PREFERENCES, normalizeTaskPreferences } from '@shared/types'
 
 const themesCss = readFileSync(
   resolve(process.cwd(), 'src/renderer/src/assets/themes.css'),
@@ -67,20 +67,22 @@ describe('主题注册表', () => {
       themeId: 'nord',
       fontUi: '',
       fontCode: '',
-      tree: DEFAULT_TREE_APPEARANCE
+      tree: DEFAULT_TREE_APPEARANCE,
+      chat: DEFAULT_CHAT_PREFERENCES
     })
     expect(normalizePreferences({ mode: 'bad', themeId: 42, fontUi: 7 })).toEqual({
       mode: 'dark',
       themeId: 'forest',
       fontUi: '',
       fontCode: '',
-      tree: DEFAULT_TREE_APPEARANCE
+      tree: DEFAULT_TREE_APPEARANCE,
+      chat: DEFAULT_CHAT_PREFERENCES
     })
     expect(
       normalizePreferences({
         tree: { aspect: '1:1', shape: 'pill', edge: 'step' }
       }).tree
-    ).toEqual({ aspect: '1:1', shape: 'pill', edge: 'step' })
+    ).toEqual({ aspect: '1:1', shape: 'pill', edge: 'step', style: DEFAULT_TREE_STYLE })
     expect(
       normalizePreferences({ tree: { aspect: '9:9', shape: 'circle', edge: 'zigzag' } }).tree
     ).toEqual(DEFAULT_TREE_APPEARANCE)
@@ -90,6 +92,43 @@ describe('主题注册表', () => {
     expect(normalizeTaskPreferences({ summaryProfileId: 7 })).toEqual({
       summaryProfileId: ''
     })
+  })
+
+  it('树样式与对话偏好归一化', () => {
+    const normalized = normalizePreferences({
+      tree: {
+        style: {
+          root: {
+            background: '#ff0000',
+            border: 'red',
+            fontSize: 99,
+            fontWeight: 550,
+            opacity: 5
+          },
+          mainNode: { border: '#00ff00' },
+          edges: {
+            main: { color: '#123456', width: 99, dash: 'wavy' },
+            normal: { width: 2 }
+          }
+        }
+      },
+      chat: { renderUserMarkdown: 'yes', foldLines: 999, viewMode: 'path' }
+    })
+
+    expect(normalized.tree.style.root.background).toBe('#ff0000')
+    expect(normalized.tree.style.root.border).toBe('')
+    expect(normalized.tree.style.root.fontSize).toBe(24)
+    expect(normalized.tree.style.root.fontWeight).toBe(0)
+    expect(normalized.tree.style.root.opacity).toBe(20)
+    expect(normalized.tree.style.mainNode.border).toBe('#00ff00')
+    expect(normalized.tree.style.edges.main.color).toBe('#123456')
+    expect(normalized.tree.style.edges.main.width).toBe(8)
+    expect(normalized.tree.style.edges.main.dash).toBe('solid')
+    expect(normalized.tree.style.edges.normal.width).toBe(2)
+    expect(normalized.tree.style.edges.current).toEqual(DEFAULT_TREE_EDGE_STYLE)
+    expect(normalized.chat.renderUserMarkdown).toBe(true)
+    expect(normalized.chat.foldLines).toBe(50)
+    expect(normalized.chat.viewMode).toBe('path')
   })
 
   it('字体预设非空且包含回退', () => {

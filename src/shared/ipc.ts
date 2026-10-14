@@ -25,6 +25,7 @@ export const IPC = {
   treeListDeleted: 'tree:listDeleted',
   treeEditNode: 'tree:editNode',
   treeSetAnswerCollapsed: 'tree:setAnswerCollapsed',
+  treeSetUserCollapsed: 'tree:setUserCollapsed',
   treeClusterUpdated: 'tree:clusterUpdated',
   exportSaveHistory: 'export:saveHistory',
   llmProfilesList: 'llmProfiles:list',

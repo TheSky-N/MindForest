@@ -1,12 +1,23 @@
 import type {
   AppPreferences,
+  ChatPreferences,
   ColorMode,
   ThemeId,
   TreeAspectId,
+  TreeEdgeDash,
   TreeEdgeId,
-  TreeShapeId
+  TreeEdgeStyle,
+  TreeNodeStyle,
+  TreeShapeId,
+  TreeStylePreferences
 } from '@shared/types'
-import { DEFAULT_PREFERENCES, DEFAULT_TREE_APPEARANCE } from '@shared/types'
+import {
+  DEFAULT_CHAT_PREFERENCES,
+  DEFAULT_PREFERENCES,
+  DEFAULT_TREE_APPEARANCE,
+  DEFAULT_TREE_EDGE_STYLE,
+  DEFAULT_TREE_NODE_STYLE
+} from '@shared/types'
 
 export interface ThemePalette {
   id: ThemeId
@@ -127,9 +138,92 @@ export function isTreeEdge(value: unknown): value is TreeEdgeId {
   return typeof value === 'string' && (TREE_EDGES as string[]).includes(value)
 }
 
+const FONT_WEIGHTS = [400, 500, 600, 700]
+const EDGE_DASHES: TreeEdgeDash[] = ['solid', 'dashed', 'dotted']
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function normalizeColor(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  return /^#[0-9a-fA-F]{3,8}$/.test(trimmed) ? trimmed : ''
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.min(Math.max(Math.round(value), min), max)
+}
+
+function normalizeNodeStyle(value: unknown): TreeNodeStyle {
+  const record = asRecord(value)
+  return {
+    background: normalizeColor(record.background),
+    border: normalizeColor(record.border),
+    text: normalizeColor(record.text),
+    fontFamily: typeof record.fontFamily === 'string' ? record.fontFamily : '',
+    fontSize: record.fontSize === 0 ? 0 : clampNumber(record.fontSize, 9, 24, 0),
+    fontWeight: FONT_WEIGHTS.includes(record.fontWeight as number)
+      ? (record.fontWeight as number)
+      : 0,
+    opacity: clampNumber(record.opacity, 20, 100, DEFAULT_TREE_NODE_STYLE.opacity)
+  }
+}
+
+function normalizeEdgeStyle(value: unknown): TreeEdgeStyle {
+  const record = asRecord(value)
+  return {
+    color: normalizeColor(record.color),
+    width: record.width === 0 ? 0 : clampNumber(record.width, 1, 8, 0),
+    dash: EDGE_DASHES.includes(record.dash as TreeEdgeDash)
+      ? (record.dash as TreeEdgeDash)
+      : DEFAULT_TREE_EDGE_STYLE.dash
+  }
+}
+
+export function normalizeTreeStyle(value: unknown): TreeStylePreferences {
+  const record = asRecord(value)
+  const edges = asRecord(record.edges)
+  const mainNode = asRecord(record.mainNode)
+  const currentNode = asRecord(record.currentNode)
+  return {
+    root: normalizeNodeStyle(record.root),
+    child: normalizeNodeStyle(record.child),
+    cluster: normalizeNodeStyle(record.cluster),
+    mainNode: { border: normalizeColor(mainNode.border) },
+    currentNode: { border: normalizeColor(currentNode.border) },
+    edges: {
+      normal: normalizeEdgeStyle(edges.normal),
+      main: normalizeEdgeStyle(edges.main),
+      current: normalizeEdgeStyle(edges.current)
+    }
+  }
+}
+
+export function normalizeChatPreferences(value: unknown): ChatPreferences {
+  const record = asRecord(value)
+  return {
+    renderUserMarkdown:
+      typeof record.renderUserMarkdown === 'boolean'
+        ? record.renderUserMarkdown
+        : DEFAULT_CHAT_PREFERENCES.renderUserMarkdown,
+    renderAssistantMarkdown:
+      typeof record.renderAssistantMarkdown === 'boolean'
+        ? record.renderAssistantMarkdown
+        : DEFAULT_CHAT_PREFERENCES.renderAssistantMarkdown,
+    foldLines: clampNumber(record.foldLines, 3, 50, DEFAULT_CHAT_PREFERENCES.foldLines),
+    viewMode: record.viewMode === 'path' ? 'path' : DEFAULT_CHAT_PREFERENCES.viewMode
+  }
+}
+
 export function normalizePreferences(value: unknown): AppPreferences {
   if (typeof value !== 'object' || value === null) {
-    return { ...DEFAULT_PREFERENCES, tree: { ...DEFAULT_TREE_APPEARANCE } }
+    return {
+      ...DEFAULT_PREFERENCES,
+      tree: { ...DEFAULT_TREE_APPEARANCE, style: normalizeTreeStyle(undefined) },
+      chat: { ...DEFAULT_CHAT_PREFERENCES }
+    }
   }
   const record = value as Record<string, unknown>
   const treeRecord =
@@ -146,7 +240,9 @@ export function normalizePreferences(value: unknown): AppPreferences {
         ? treeRecord.aspect
         : DEFAULT_TREE_APPEARANCE.aspect,
       shape: isTreeShape(treeRecord.shape) ? treeRecord.shape : DEFAULT_TREE_APPEARANCE.shape,
-      edge: isTreeEdge(treeRecord.edge) ? treeRecord.edge : DEFAULT_TREE_APPEARANCE.edge
-    }
+      edge: isTreeEdge(treeRecord.edge) ? treeRecord.edge : DEFAULT_TREE_APPEARANCE.edge,
+      style: normalizeTreeStyle(treeRecord.style)
+    },
+    chat: normalizeChatPreferences(record.chat)
   }
 }
