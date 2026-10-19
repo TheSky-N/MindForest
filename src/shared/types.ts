@@ -15,6 +15,7 @@ export interface TurnNode {
   title: string | null
   titleGenerated: boolean
   assistantContent: string
+  assistantReasoning: string
   assistantStatus: NodeStatus
   assistantError: string | null
   model: string | null
@@ -62,6 +63,25 @@ export interface HistoryExportResult {
   filePath: string | null
 }
 
+export interface SearchResult {
+  nodeId: string
+  projectId: string
+  projectName: string
+  title: string | null
+  matchedField: 'title' | 'user' | 'assistant'
+  snippet: string
+  matchStart: number
+  matchLength: number
+  createdAt: Date
+}
+
+export interface BackupInfo {
+  fileName: string
+  filePath: string
+  size: number
+  createdAt: Date
+}
+
 export interface NodeQuote {
   id: string
   nodeId: string
@@ -71,8 +91,29 @@ export interface NodeQuote {
   updatedAt: Date
 }
 
+export type AttachmentKind = 'image' | 'file'
+
+export interface Attachment {
+  id: string
+  nodeId: string
+  kind: AttachmentKind
+  name: string
+  mimeType: string
+  size: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface ChatAttachmentInput {
+  kind: AttachmentKind
+  name: string
+  mimeType: string
+  dataBase64: string
+}
+
 export interface NodePathEntry extends TurnNode {
   quotes: NodeQuote[]
+  attachments: Attachment[]
 }
 
 export interface QuoteInput {
@@ -114,6 +155,7 @@ export interface ChatDeltaEvent {
   requestId: string
   nodeId: string
   delta: string
+  reasoningDelta?: string
 }
 
 export interface ChatDoneEvent {
@@ -131,12 +173,57 @@ export interface ChatSendResult {
   node: TurnNode
 }
 
+export type LlmProviderId =
+  'deepseek' | 'openai' | 'openrouter' | 'ollama' | 'moonshot' | 'qwen' | 'zhipu' | 'custom'
+
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high'
+
+export type ReasoningDisplay = 'always' | 'collapsed' | 'hidden'
+
+export interface LlmCapabilities {
+  reasoning: boolean
+  vision: boolean
+  contextWindow: number
+  maxOutput: number
+}
+
+export const DEFAULT_LLM_CAPABILITIES: LlmCapabilities = {
+  reasoning: false,
+  vision: false,
+  contextWindow: 128000,
+  maxOutput: 8192
+}
+
+export function normalizeLlmCapabilities(value: unknown): LlmCapabilities {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_LLM_CAPABILITIES }
+  const record = value as Record<string, unknown>
+  const count = (input: unknown, fallback: number, min: number, max: number): number => {
+    const parsed = typeof input === 'number' ? input : Number(input)
+    if (!Number.isFinite(parsed)) return fallback
+    return Math.min(Math.max(Math.round(parsed), min), max)
+  }
+  return {
+    reasoning: record.reasoning === true,
+    vision: record.vision === true,
+    contextWindow: count(
+      record.contextWindow,
+      DEFAULT_LLM_CAPABILITIES.contextWindow,
+      1000,
+      2000000
+    ),
+    maxOutput: count(record.maxOutput, DEFAULT_LLM_CAPABILITIES.maxOutput, 256, 200000)
+  }
+}
+
 export interface LlmProfile {
   id: string
   name: string
+  provider: LlmProviderId
   baseUrl: string
   model: string
   temperature: number
+  capabilities: LlmCapabilities
+  reasoningEffort: ReasoningEffort | null
   hasApiKey: boolean
   isActive: boolean
   createdAt: Date
@@ -145,9 +232,12 @@ export interface LlmProfile {
 
 export interface LlmProfileInput {
   name: string
+  provider?: LlmProviderId
   baseUrl: string
   model: string
   temperature?: number
+  capabilities?: LlmCapabilities
+  reasoningEffort?: ReasoningEffort | null
   apiKey?: string
 }
 
@@ -161,6 +251,7 @@ export interface AppInfo {
   version: string
   platform: string
   dbPath: string
+  backupDir: string
   secureStorageAvailable: boolean
 }
 
@@ -213,6 +304,8 @@ export interface ChatPreferences {
   renderAssistantMarkdown: boolean
   foldLines: number
   viewMode: ChatViewMode
+  reasoningDisplay: ReasoningDisplay
+  reasoningFoldLines: number
 }
 
 export type TabsPosition = 'top' | 'left'
@@ -301,7 +394,9 @@ export const DEFAULT_CHAT_PREFERENCES: ChatPreferences = {
   renderUserMarkdown: true,
   renderAssistantMarkdown: true,
   foldLines: 10,
-  viewMode: 'single'
+  viewMode: 'single',
+  reasoningDisplay: 'collapsed',
+  reasoningFoldLines: 8
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {

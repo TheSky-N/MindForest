@@ -1,6 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DatabaseHandle } from '@main/db/client'
 import { assembleNodeContext } from '@main/llm/contextAssembler'
+import type { ChatContentPart } from '@main/llm/client'
+import { saveChatAttachments } from '@main/attachments/storage'
+import { createAttachmentRepository } from '@main/db/repositories/attachments'
 import { createDigestRepository } from '@main/db/repositories/digests'
 import { createNodeRepository } from '@main/db/repositories/nodes'
 import { createProjectRepository } from '@main/db/repositories/projects'
@@ -45,10 +51,7 @@ function chain(
 describe('祖先链上下文装配', () => {
   it('根到目标节点的完整链路（目标自身回答未完成时不入上下文）', () => {
     const { nodes, project } = setup()
-    const ids = chain(nodes, project.id, [
-      { q: '问题一', a: '回答一' },
-      { q: '问题二' }
-    ])
+    const ids = chain(nodes, project.id, [{ q: '问题一', a: '回答一' }, { q: '问题二' }])
     const context = assembleNodeContext(handle.db, ids[1]!)
 
     expect(context.system).toContain('学习项目')
@@ -58,13 +61,8 @@ describe('祖先链上下文装配', () => {
 
   it('引用内容会注入到下一条用户消息', () => {
     const { nodes, quotes, project } = setup()
-    const ids = chain(nodes, project.id, [
-      { q: '问题一', a: '回答一' },
-      { q: '问题二' }
-    ])
-    quotes.createMany(ids[1]!, [
-      { quotedNodeId: ids[0]!, quoteText: '被引用的回答片段' }
-    ])
+    const ids = chain(nodes, project.id, [{ q: '问题一', a: '回答一' }, { q: '问题二' }])
+    quotes.createMany(ids[1]!, [{ quotedNodeId: ids[0]!, quoteText: '被引用的回答片段' }])
 
     const context = assembleNodeContext(handle.db, ids[1]!)
     const last = context.messages[context.messages.length - 1]
@@ -106,5 +104,71 @@ describe('祖先链上下文装配', () => {
     const contents = context.messages.map((message) => message.content)
     expect(contents).not.toContain('问题一'.repeat(30))
     expect(contents[contents.length - 1]).toBe('最后一问')
+  })
+
+  it('文本附件会作为上下文注入用户消息', () => {
+    const { nodes, project } = setup()
+    const node = nodes.create({
+      projectId: project.id,
+      parentId: null,
+      userContent: '总结这个文件'
+    })
+    createAttachmentRepository(handle.db).createMany(node.id, [
+      {
+        id: 'attachment-text',
+        kind: 'file',
+        name: 'notes.md',
+        mimeType: 'text/markdown',
+        size: 12,
+        storagePath: 'unused/notes.md',
+        textContent: '这是附件正文内容'
+      }
+    ])
+
+    const context = assembleNodeContext(handle.db, node.id)
+    const last = context.messages[context.messages.length - 1]
+    expect(typeof last?.content).toBe('string')
+    expect(last?.content).toContain('【附件：notes.md】')
+    expect(last?.content).toContain('这是附件正文内容')
+  })
+
+  it('视觉模型会把图片附件组装为多模态片段', () => {
+    const { nodes, project } = setup()
+    const node = nodes.create({
+      projectId: project.id,
+      parentId: null,
+      userContent: '看看这张图'
+    })
+    const root = mkdtempSync(join(tmpdir(), 'mindforest-attachments-'))
+    try {
+      const stored = saveChatAttachments(root, node.id, [
+        {
+          kind: 'image',
+          name: 'pixel.png',
+          mimeType: 'image/png',
+          dataBase64:
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        }
+      ])
+      createAttachmentRepository(handle.db).createMany(node.id, stored)
+
+      const visionContext = assembleNodeContext(handle.db, node.id, {
+        vision: true,
+        attachmentsRoot: root
+      })
+      const visionMessage = visionContext.messages[visionContext.messages.length - 1]
+      expect(Array.isArray(visionMessage?.content)).toBe(true)
+      const parts = visionMessage?.content as ChatContentPart[]
+      expect(parts.some((part) => part.type === 'image_url')).toBe(true)
+
+      const textContext = assembleNodeContext(handle.db, node.id, {
+        vision: false,
+        attachmentsRoot: root
+      })
+      const textMessage = textContext.messages[textContext.messages.length - 1]
+      expect(typeof textMessage?.content).toBe('string')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

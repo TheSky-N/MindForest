@@ -1,7 +1,9 @@
 import { app, BrowserWindow, clipboard, ipcMain, shell, type WebContents } from 'electron'
-import { dirname } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type {
+  ChatAttachmentInput,
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
@@ -11,15 +13,30 @@ import type {
   MigrationReport,
   QuoteInput
 } from '@shared/types'
-import { normalizeTaskPreferences } from '@shared/types'
+import { normalizeLlmCapabilities, normalizeTaskPreferences } from '@shared/types'
 import type { AppDatabase } from '../db/client'
-import { getDatabasePath } from '../db'
+import { closeDatabase, getDatabaseHandle, getDatabasePath } from '../db'
 import { createProjectRepository } from '../db/repositories/projects'
 import { createNodeRepository } from '../db/repositories/nodes'
-import { createLlmProfileRepository } from '../db/repositories/llmProfiles'
+import {
+  createLlmProfileRepository,
+  parseProvider,
+  parseReasoningEffort
+} from '../db/repositories/llmProfiles'
 import { createQuoteRepository } from '../db/repositories/quotes'
 import { createClusterRepository } from '../db/repositories/clusters'
 import { createSettingsRepository } from '../db/repositories/settings'
+import type { SettingsRepository } from '../db/repositories/settings'
+import { createAttachmentRepository } from '../db/repositories/attachments'
+import { createSearchRepository } from '../db/repositories/search'
+import { readAttachmentDataUrl } from '../attachments/storage'
+import {
+  createBackup,
+  isBackupFile,
+  listBackups,
+  pruneBackups,
+  restoreBackupFile
+} from '../backup/backupService'
 import { isSecureStorageAvailable } from '../secureStore'
 import { clearApiKey, getApiKey, hasSessionApiKey, storeApiKey } from '../security/apiKeys'
 import { createChatService, type ChatEventSink, type RuntimeProfile } from '../chat/chatService'
@@ -39,14 +56,21 @@ function safeSend(sender: WebContents, channel: string, payload: unknown): void 
   sender.send(channel, payload)
 }
 
-export function registerIpcHandlers(options: { db: AppDatabase }): void {
+export function registerIpcHandlers(options: {
+  db: AppDatabase
+  settings?: SettingsRepository
+}): void {
   const { db } = options
   const projects = createProjectRepository(db)
   const nodes = createNodeRepository(db)
   const profiles = createLlmProfileRepository(db)
   const quotes = createQuoteRepository(db)
   const clusters = createClusterRepository(db)
-  const settings = createSettingsRepository(db)
+  const settings = options.settings ?? createSettingsRepository(db)
+  const attachmentRepo = createAttachmentRepository(db)
+  const searchRepo = createSearchRepository(db)
+  const backupDir = join(app.getPath('userData'), 'backups')
+  const attachmentsRoot = join(app.getPath('userData'), 'attachments')
 
   const clusterSummarizing = new Set<string>()
 
@@ -63,11 +87,24 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     } catch {
       preferredId = ''
     }
-    const row =
-      (preferredId ? profiles.getRow(preferredId) : undefined) ?? profiles.getActiveRow()
+    const row = (preferredId ? profiles.getRow(preferredId) : undefined) ?? profiles.getActiveRow()
     if (!row) throw new Error('请先在「模型设置」中配置并启用一个模型')
     const apiKey = getApiKey(row.id, row.apiKeyEncrypted) ?? undefined
-    return { baseUrl: row.baseUrl, model: row.model, temperature: row.temperature, apiKey }
+    let capabilities: ReturnType<typeof normalizeLlmCapabilities> | undefined
+    try {
+      capabilities = normalizeLlmCapabilities(JSON.parse(row.capabilities))
+    } catch {
+      void 0
+    }
+    return {
+      provider: parseProvider(row.provider),
+      baseUrl: row.baseUrl,
+      model: row.model,
+      temperature: row.temperature,
+      capabilities,
+      reasoningEffort: parseReasoningEffort(row.reasoningEffort),
+      apiKey
+    }
   }
 
   const digestInFlight = new Set<string>()
@@ -102,7 +139,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     }
   }
 
-  const chatService = createChatService({ db, onTurnSettled: scheduleChainDigest })
+  const chatService = createChatService({
+    db,
+    onTurnSettled: scheduleChainDigest,
+    attachmentsRoot
+  })
 
   const chatEvents = (sender: WebContents): ChatEventSink => ({
     delta: (payload: ChatDeltaEvent) => safeSend(sender, IPC.chatDelta, payload),
@@ -114,10 +155,51 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     version: app.getVersion(),
     platform: process.platform,
     dbPath: getDatabasePath(),
+    backupDir,
     secureStorageAvailable: isSecureStorageAvailable()
   }))
 
   ipcMain.handle(IPC.appOpenDataDir, () => shell.openPath(dirname(getDatabasePath())))
+
+  ipcMain.handle(IPC.appOpenBackupsDir, () => {
+    mkdirSync(backupDir, { recursive: true })
+    return shell.openPath(backupDir)
+  })
+
+  ipcMain.handle(IPC.appListBackups, () => listBackups(backupDir))
+
+  ipcMain.handle(IPC.appBackupNow, async () => {
+    const backup = await createBackup(getDatabaseHandle().sqlite, backupDir, 'manual')
+    pruneBackups(backupDir)
+    return backup
+  })
+
+  ipcMain.handle(IPC.appRestoreBackup, async (_event, input: { fileName: string }) => {
+    if (!isBackupFile(input.fileName)) throw new Error('无效的备份文件')
+    const backupPath = join(backupDir, input.fileName)
+    const handle = getDatabaseHandle()
+    await createBackup(handle.sqlite, backupDir, 'pre-restore')
+    closeDatabase()
+    restoreBackupFile(backupPath, getDatabasePath())
+    app.relaunch()
+    app.exit(0)
+  })
+
+  ipcMain.handle(
+    IPC.searchQuery,
+    (_event, input: { query: string; projectId?: string; limit?: number }) =>
+      searchRepo.query(input)
+  )
+
+  ipcMain.handle(IPC.attachmentsRead, (_event, input: { id: string }) => {
+    const meta = attachmentRepo.get(input.id)
+    if (!meta) return null
+    const storage = attachmentRepo.getStoragePath(input.id)
+    if (!storage) return null
+    const dataUrl = readAttachmentDataUrl(attachmentsRoot, storage.storagePath, storage.mimeType)
+    if (!dataUrl) return null
+    return { dataUrl, mimeType: meta.mimeType, name: meta.name }
+  })
 
   ipcMain.handle(IPC.appSetZoom, (event, input: { scale: number }) => {
     const percent = Math.min(Math.max(Number(input.scale) || 100, 50), 200)
@@ -138,8 +220,9 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     }
   })
 
-  ipcMain.handle(IPC.settingsGet, (_event, input: { key: string }) =>
-    settings.get(input.key) ?? null
+  ipcMain.handle(
+    IPC.settingsGet,
+    (_event, input: { key: string }) => settings.get(input.key) ?? null
   )
   ipcMain.handle(IPC.settingsSet, (_event, input: { key: string; value: string }) => {
     settings.set(input.key, input.value)
@@ -162,8 +245,16 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   ipcMain.handle(IPC.treeGetPath, (_event, input: { nodeId: string }) => {
     const path = nodes.getPath(input.nodeId)
     const quotesByNode = new Map<string, ReturnType<typeof quotes.listByNode>>()
-    for (const node of path) quotesByNode.set(node.id, quotes.listByNode(node.id))
-    return path.map((node) => ({ ...node, quotes: quotesByNode.get(node.id) ?? [] }))
+    const attachmentsByNode = new Map<string, ReturnType<typeof attachmentRepo.listByNode>>()
+    for (const node of path) {
+      quotesByNode.set(node.id, quotes.listByNode(node.id))
+      attachmentsByNode.set(node.id, attachmentRepo.listByNode(node.id))
+    }
+    return path.map((node) => ({
+      ...node,
+      quotes: quotesByNode.get(node.id) ?? [],
+      attachments: attachmentsByNode.get(node.id) ?? []
+    }))
   })
 
   ipcMain.handle(IPC.treeListClusters, (_event, input: { projectId: string }) =>
@@ -241,14 +332,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
 
   ipcMain.handle(
     IPC.treeEditNode,
-    (_event, input: { nodeId: string; content: string; syncGroup?: boolean }) =>
-      editNode(db, input)
+    (_event, input: { nodeId: string; content: string; syncGroup?: boolean }) => editNode(db, input)
   )
 
-  ipcMain.handle(
-    IPC.treeRenameNode,
-    (_event, input: { nodeId: string; title: string | null }) =>
-      nodes.renameNode(input.nodeId, input.title)
+  ipcMain.handle(IPC.treeRenameNode, (_event, input: { nodeId: string; title: string | null }) =>
+    nodes.renameNode(input.nodeId, input.title)
   )
 
   ipcMain.handle(IPC.treeGenerateNodeTitle, async (_event, input: { nodeId: string }) => {
@@ -265,9 +353,12 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
   ipcMain.handle(IPC.llmProfilesCreate, (_event, input: LlmProfileInput) => {
     let profile = profiles.create({
       name: input.name.trim() || '未命名配置',
+      provider: parseProvider(input.provider),
       baseUrl: input.baseUrl.trim(),
       model: input.model.trim(),
       temperature: input.temperature,
+      capabilities: input.capabilities ? normalizeLlmCapabilities(input.capabilities) : undefined,
+      reasoningEffort: parseReasoningEffort(input.reasoningEffort),
       apiKeyEncrypted: null
     })
     if (input.apiKey) {
@@ -286,15 +377,25 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
     (_event, input: { id: string } & Partial<LlmProfileInput>) => {
       const patch: {
         name?: string
+        provider?: ReturnType<typeof parseProvider>
         baseUrl?: string
         model?: string
         temperature?: number
+        capabilities?: ReturnType<typeof normalizeLlmCapabilities>
+        reasoningEffort?: ReturnType<typeof parseReasoningEffort>
         apiKeyEncrypted?: string | null
       } = {}
       if (input.name !== undefined) patch.name = input.name.trim() || '未命名配置'
+      if (input.provider !== undefined) patch.provider = parseProvider(input.provider)
       if (input.baseUrl !== undefined) patch.baseUrl = input.baseUrl.trim()
       if (input.model !== undefined) patch.model = input.model.trim()
       if (input.temperature !== undefined) patch.temperature = input.temperature
+      if (input.capabilities !== undefined) {
+        patch.capabilities = normalizeLlmCapabilities(input.capabilities)
+      }
+      if (input.reasoningEffort !== undefined) {
+        patch.reasoningEffort = parseReasoningEffort(input.reasoningEffort)
+      }
       if (input.apiKey !== undefined) {
         if (input.apiKey === '') {
           clearApiKey(input.id)
@@ -322,9 +423,11 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
       if (!row) throw new Error('模型配置不存在')
       const apiKey = getApiKey(row.id, row.apiKeyEncrypted) ?? undefined
       const reply = await completeChat({
+        provider: parseProvider(row.provider),
         baseUrl: row.baseUrl,
         model: row.model,
         temperature: row.temperature,
+        reasoningEffort: parseReasoningEffort(row.reasoningEffort),
         apiKey,
         messages: [{ role: 'user', content: '请只回复四个字：连接成功' }],
         maxTokens: 32
@@ -344,6 +447,7 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
         parentId: string | null
         content: string
         quotes?: QuoteInput[]
+        attachments?: ChatAttachmentInput[]
       }
     ) => {
       return chatService.send({
@@ -351,6 +455,7 @@ export function registerIpcHandlers(options: { db: AppDatabase }): void {
         parentId: input.parentId,
         content: input.content,
         quotes: input.quotes,
+        attachments: input.attachments,
         profile: resolveTaskProfile(),
         events: chatEvents(event.sender)
       })

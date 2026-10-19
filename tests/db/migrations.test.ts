@@ -17,6 +17,8 @@ describe('数据库迁移', () => {
         'node_digests',
         'topic_clusters',
         'topic_cluster_nodes',
+        'attachments',
+        'nodes_fts',
         'llm_profiles',
         'settings',
         'cards',
@@ -44,8 +46,25 @@ describe('数据库迁移', () => {
         'prompt_tokens',
         'completion_tokens',
         'deleted_at',
-        'assistant_status'
+        'assistant_status',
+        'assistant_reasoning'
       ])
+    )
+
+    const profileColumns = (
+      sqlite.prepare("pragma table_info('llm_profiles')").all() as Array<{ name: string }>
+    ).map((column) => column.name)
+    expect(profileColumns).toEqual(
+      expect.arrayContaining(['provider', 'capabilities', 'reasoning_effort'])
+    )
+
+    const triggers = (
+      sqlite.prepare("select name from sqlite_master where type = 'trigger'").all() as Array<{
+        name: string
+      }>
+    ).map((row) => row.name)
+    expect(triggers).toEqual(
+      expect.arrayContaining(['nodes_fts_ai', 'nodes_fts_ad', 'nodes_fts_au'])
     )
 
     const clusterColumns = (

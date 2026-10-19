@@ -20,9 +20,19 @@ const api: MindForestApi = {
   app: {
     getInfo: () => ipcRenderer.invoke(IPC.appGetInfo),
     openDataDir: () => ipcRenderer.invoke(IPC.appOpenDataDir),
+    openBackupsDir: () => ipcRenderer.invoke(IPC.appOpenBackupsDir),
+    backupNow: () => ipcRenderer.invoke(IPC.appBackupNow),
+    listBackups: () => ipcRenderer.invoke(IPC.appListBackups),
+    restoreBackup: (input) => ipcRenderer.invoke(IPC.appRestoreBackup, input),
     migrationReport: () => ipcRenderer.invoke(IPC.appMigrationReport),
     setZoom: (scale) => ipcRenderer.invoke(IPC.appSetZoom, { scale }),
     copyText: (text) => ipcRenderer.invoke(IPC.appCopyText, { text })
+  },
+  attachments: {
+    read: (input) => ipcRenderer.invoke(IPC.attachmentsRead, input)
+  },
+  search: {
+    query: (input) => ipcRenderer.invoke(IPC.searchQuery, input)
   },
   settings: {
     get: (input) => ipcRenderer.invoke(IPC.settingsGet, input),

@@ -1,5 +1,7 @@
 import type {
   AppInfo,
+  BackupInfo,
+  ChatAttachmentInput,
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
@@ -16,6 +18,7 @@ import type {
   NodePathEntry,
   Project,
   QuoteInput,
+  SearchResult,
   TopicCluster,
   TurnNode
 } from './types'
@@ -24,9 +27,23 @@ export interface MindForestApi {
   app: {
     getInfo(): Promise<AppInfo>
     openDataDir(): Promise<void>
+    openBackupsDir(): Promise<void>
+    backupNow(): Promise<BackupInfo>
+    listBackups(): Promise<BackupInfo[]>
+    restoreBackup(input: { fileName: string }): Promise<void>
     migrationReport(): Promise<MigrationReport | null>
     setZoom(scale: number): Promise<void>
     copyText(text: string): Promise<void>
+  }
+  attachments: {
+    read(input: { id: string }): Promise<{
+      dataUrl: string
+      mimeType: string
+      name: string
+    } | null>
+  }
+  search: {
+    query(input: { query: string; projectId?: string; limit?: number }): Promise<SearchResult[]>
   }
   settings: {
     get(input: { key: string }): Promise<string | null>
@@ -55,19 +72,12 @@ export interface MindForestApi {
     setArchived(input: { nodeId: string; archived: boolean }): Promise<TurnNode>
     setCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
     setAnswerCollapsed(input: { nodeId: string; collapsed: boolean }): Promise<TurnNode>
-    setUserCollapsed(input: {
-      nodeId: string
-      collapsed: boolean | null
-    }): Promise<TurnNode>
+    setUserCollapsed(input: { nodeId: string; collapsed: boolean | null }): Promise<TurnNode>
     deleteNode(input: { nodeId: string }): Promise<void>
     restoreNode(input: { nodeId: string }): Promise<void>
     purgeNode(input: { nodeId: string }): Promise<void>
     listDeleted(input: { projectId: string }): Promise<DeletedNodeInfo[]>
-    editNode(input: {
-      nodeId: string
-      content: string
-      syncGroup?: boolean
-    }): Promise<TurnNode>
+    editNode(input: { nodeId: string; content: string; syncGroup?: boolean }): Promise<TurnNode>
     renameNode(input: { nodeId: string; title: string | null }): Promise<TurnNode>
     generateNodeTitle(input: { nodeId: string }): Promise<TurnNode>
     onClusterUpdated(callback: (cluster: ClusterWithMembers) => void): () => void
@@ -86,6 +96,7 @@ export interface MindForestApi {
       parentId: string | null
       content: string
       quotes?: QuoteInput[]
+      attachments?: ChatAttachmentInput[]
     }): Promise<ChatSendResult>
     regenerate(input: { nodeId: string }): Promise<ChatSendResult>
     cancel(input: { requestId: string }): Promise<void>

@@ -43,6 +43,13 @@
       "when": 1791963035863,
       "tag": "0005_bumpy_tenebrous",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792380250402,
+      "tag": "0006_mature_firebrand",
+      "breakpoints": true
     }
   ]
 }

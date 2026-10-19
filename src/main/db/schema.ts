@@ -107,9 +107,12 @@ export const cardSummaries = sqliteTable('card_summaries', {
 export const llmProfiles = sqliteTable('llm_profiles', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  provider: text('provider').notNull().default('custom'),
   baseUrl: text('base_url').notNull(),
   model: text('model').notNull(),
   temperature: real('temperature').notNull().default(0.7),
+  capabilities: text('capabilities').notNull().default('{}'),
+  reasoningEffort: text('reasoning_effort', { enum: ['none', 'low', 'medium', 'high'] }),
   apiKeyEncrypted: text('api_key_encrypted'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
   ...timestamps
@@ -135,6 +138,7 @@ export const nodes = sqliteTable(
     title: text('title'),
     titleGenerated: integer('title_generated', { mode: 'boolean' }).notNull().default(false),
     assistantContent: text('assistant_content').notNull().default(''),
+    assistantReasoning: text('assistant_reasoning').notNull().default(''),
     assistantStatus: text('assistant_status', {
       enum: ['streaming', 'complete', 'aborted', 'error']
     })
@@ -175,6 +179,24 @@ export const nodeQuotes = sqliteTable(
     ...timestamps
   },
   (t) => [index('node_quotes_node_idx').on(t.nodeId)]
+)
+
+export const attachments = sqliteTable(
+  'attachments',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['image', 'file'] }).notNull(),
+    name: text('name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    size: integer('size').notNull(),
+    storagePath: text('storage_path').notNull(),
+    textContent: text('text_content'),
+    ...timestamps
+  },
+  (t) => [index('attachments_node_idx').on(t.nodeId)]
 )
 
 export const topicClusters = sqliteTable(
@@ -228,6 +250,7 @@ export type CardSummaryRow = typeof cardSummaries.$inferSelect
 export type LlmProfileRow = typeof llmProfiles.$inferSelect
 export type NodeRow = typeof nodes.$inferSelect
 export type NodeQuoteRow = typeof nodeQuotes.$inferSelect
+export type AttachmentRow = typeof attachments.$inferSelect
 export type TopicClusterRow = typeof topicClusters.$inferSelect
 export type TopicClusterNodeRow = typeof topicClusterNodes.$inferSelect
 export type NodeDigestRow = typeof nodeDigests.$inferSelect

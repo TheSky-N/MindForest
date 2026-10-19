@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { HistoryExportFormat, HistoryExportResult, TurnNode } from '@shared/types'
 import type { AppDatabase } from '../db/client'
+import { createAttachmentRepository } from '../db/repositories/attachments'
 import { createClusterRepository } from '../db/repositories/clusters'
 import { createNodeRepository } from '../db/repositories/nodes'
 import { createProjectRepository } from '../db/repositories/projects'
@@ -44,6 +45,7 @@ export function buildPathMarkdown(db: AppDatabase, nodeId: string): string {
   if (path.length === 0) throw new Error('节点不存在')
   const project = createProjectRepository(db).get(path[0]!.projectId)
   const quoteRepo = createQuoteRepository(db)
+  const attachmentRepo = createAttachmentRepository(db)
   const lines: string[] = []
   lines.push(`# ${project?.name ?? '对话历史'}`)
   lines.push('')
@@ -57,6 +59,24 @@ export function buildPathMarkdown(db: AppDatabase, nodeId: string): string {
     }
     if (nodeQuotes.length > 0) lines.push('')
     lines.push('**用户**', '', node.userContent, '')
+    const nodeAttachments = attachmentRepo.listByNode(node.id)
+    for (const attachment of nodeAttachments) {
+      lines.push(`> 附件：${attachment.name}（${attachment.mimeType}）`)
+    }
+    if (nodeAttachments.length > 0) lines.push('')
+    if (node.assistantReasoning.trim()) {
+      lines.push(
+        '**思考过程**',
+        '',
+        '<details>',
+        '<summary>展开思考过程</summary>',
+        '',
+        node.assistantReasoning,
+        '',
+        '</details>',
+        ''
+      )
+    }
     const modelLabel = node.model ? `（${node.model}）` : ''
     lines.push(`**AI${modelLabel}**`, '')
     if (node.assistantContent.trim()) {
@@ -82,6 +102,7 @@ export function buildProjectJson(db: AppDatabase, projectId: string): string {
     .listByProject(projectId)
     .filter((node) => !node.deletedAt)
   const quotes = createQuoteRepository(db).listByNodes(allNodes.map((node) => node.id))
+  const attachmentRows = createAttachmentRepository(db).listByNodes(allNodes.map((node) => node.id))
   const clusters = createClusterRepository(db).listWithMembers(projectId)
   return JSON.stringify(
     {
@@ -90,7 +111,8 @@ export function buildProjectJson(db: AppDatabase, projectId: string): string {
       project,
       nodes: allNodes,
       clusters,
-      quotes
+      quotes,
+      attachments: attachmentRows
     },
     null,
     2
@@ -107,7 +129,9 @@ export async function saveHistoryExport(
 
   const isMarkdown = input.format === 'markdown'
   if (isMarkdown && !input.nodeId) throw new Error('请先选择要导出的对话节点')
-  const content = isMarkdown ? buildPathMarkdown(db, input.nodeId!) : buildProjectJson(db, project.id)
+  const content = isMarkdown
+    ? buildPathMarkdown(db, input.nodeId!)
+    : buildProjectJson(db, project.id)
 
   const extension = isMarkdown ? 'md' : 'json'
   const label = isMarkdown ? '对话路径' : '完整数据'

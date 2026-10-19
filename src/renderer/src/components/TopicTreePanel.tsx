@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
+  Crosshair,
   Layers,
   Maximize2,
   Minimize2,
@@ -54,9 +55,7 @@ function useCanvasDotColor(): string {
   return useMemo(() => {
     void themeId
     void mode
-    return getComputedStyle(document.documentElement)
-      .getPropertyValue('--mf-canvas-dot')
-      .trim()
+    return getComputedStyle(document.documentElement).getPropertyValue('--mf-canvas-dot').trim()
   }, [themeId, mode])
 }
 
@@ -68,6 +67,9 @@ function isEditableTarget(event: KeyboardEvent): boolean {
 }
 
 function Flow() {
+  const activeTabId = useAppStore((state) => state.activeTabId)
+  const savedViewport = useAppStore((state) => selectActiveTabState(state).viewport)
+  const setTabViewport = useAppStore((state) => state.setTabViewport)
   const nodes = useAppStore((state) => selectActiveTabState(state).nodes)
   const clusters = useAppStore((state) => selectActiveTabState(state).clusters)
   const membership = useAppStore((state) => selectActiveTabState(state).membership)
@@ -105,9 +107,7 @@ function Flow() {
   const [menu, setMenu] = useState<{ vnode: VisibleTreeNode; x: number; y: number } | null>(null)
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<{ clusterId: string; value: string } | null>(null)
-  const [renamingNode, setRenamingNode] = useState<{ nodeId: string; value: string } | null>(
-    null
-  )
+  const [renamingNode, setRenamingNode] = useState<{ nodeId: string; value: string } | null>(null)
   const [editing, setEditing] = useState<{
     nodeId: string
     value: string
@@ -123,6 +123,8 @@ function Flow() {
   const containerRef = useRef<HTMLDivElement>(null)
   const boxFlowRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
   const lastClickRef = useRef<{ id: string; at: number } | null>(null)
+  const lastTabRef = useRef<string | null>(null)
+  const pendingFitRef = useRef(false)
   const dotColor = useCanvasDotColor()
 
   useEffect(() => {
@@ -192,8 +194,7 @@ function Flow() {
               ? 'main'
               : 'other'
         const role = palette[roleName]
-        const customRing =
-          !isGroupBox && (preview || active) && Boolean(role.border)
+        const customRing = !isGroupBox && (preview || active) && Boolean(role.border)
         const style: CSSProperties = {}
         if (!isGroupBox) {
           style.backgroundColor = role.background || `var(--mf-tree-${roleName}-bg)`
@@ -238,6 +239,8 @@ function Flow() {
           connectable: false,
           selectable: false,
           zIndex: isGroupBox ? -1 : 0,
+          width: isGroupBox ? (vnode.width ?? nodeSize.width) : nodeSize.width,
+          height: isGroupBox ? (vnode.height ?? nodeSize.height) : nodeSize.height,
           style: isGroupBox
             ? { width: vnode.width ?? nodeSize.width, height: vnode.height ?? nodeSize.height }
             : { width: nodeSize.width, height: nodeSize.height }
@@ -288,9 +291,40 @@ function Flow() {
   )
 
   useEffect(() => {
-    if (!instance) return
-    instance.fitView({ padding: 0.25, duration: 200 })
+    if (!instance || !activeTabId) return
+    if (lastTabRef.current === activeTabId) return
+    lastTabRef.current = activeTabId
+    if (savedViewport) {
+      pendingFitRef.current = false
+      instance.setViewport(savedViewport)
+    } else {
+      pendingFitRef.current = true
+    }
+  }, [instance, activeTabId, savedViewport])
+
+  useEffect(() => {
+    if (!instance || !pendingFitRef.current || result.nodes.length === 0) return
+    const timer = window.setTimeout(() => {
+      if (!pendingFitRef.current) return
+      pendingFitRef.current = false
+      instance.fitView({ padding: 0.25, duration: 200 })
+    }, 60)
+    return () => window.clearTimeout(timer)
   }, [instance, result, nodeSize])
+
+  const locateCurrent = () => {
+    const target = previewNodeId ?? activeNodeId
+    if (!target || !instance) return
+    const vnodeId = result.vnodeIdByNodeId[target]
+    const vnode = result.nodes.find((item) => item.id === vnodeId)
+    if (!vnode) return
+    const width = vnode.width ?? nodeSize.width
+    const height = vnode.height ?? nodeSize.height
+    instance.setCenter(vnode.x + width / 2, vnode.y + height / 2, {
+      zoom: Math.max(instance.getZoom(), 0.6),
+      duration: 300
+    })
+  }
 
   useEffect(() => {
     if (!notice) return
@@ -353,14 +387,15 @@ function Flow() {
         .filter((vnode) => {
           const width = vnode.width ?? nodeSize.width
           const height = vnode.height ?? nodeSize.height
-          return vnode.x < maxX && vnode.x + width > minX && vnode.y < maxY && vnode.y + height > minY
+          return (
+            vnode.x < maxX && vnode.x + width > minX && vnode.y < maxY && vnode.y + height > minY
+          )
         })
         .flatMap((vnode) =>
           vnode.kind === 'cluster' && vnode.cluster ? vnode.cluster.nodeIds : [vnode.id]
         )
       const state = useAppStore.getState()
-      const current =
-        state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
+      const current = state.tabs.find((tab) => tab.id === state.activeTabId)?.selectedNodeIds ?? []
       const next = additive ? Array.from(new Set([...current, ...hitIds])) : hitIds
       setSelection(next)
     }
@@ -427,6 +462,9 @@ function Flow() {
           setMenu(null)
           setPaneMenu(null)
         }}
+        onMoveEnd={(_event, viewport) => {
+          if (activeTabId) setTabViewport(activeTabId, viewport)
+        }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
@@ -436,7 +474,6 @@ function Flow() {
         zoomActivationKeyCode={null}
         deleteKeyCode={null}
         onlyRenderVisibleElements
-        fitView
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
@@ -638,6 +675,14 @@ function Flow() {
       <DeletedNodesDialog open={deletedOpen} onClose={() => setDeletedOpen(false)} />
 
       <div className="absolute right-3 top-3 z-30 flex items-center gap-1">
+        <button
+          type="button"
+          title="定位当前节点"
+          onClick={locateCurrent}
+          className="rounded border border-border bg-card p-1.5 text-fg-subtle shadow-sm hover:text-fg"
+        >
+          <Crosshair className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           title={selectMode ? '退出选择模式' : '选择模式（左键拖拽框选）'}

@@ -1,4 +1,4 @@
-import type { ChatViewMode } from '@shared/types'
+import type { ChatViewMode, ReasoningDisplay } from '@shared/types'
 import { useAppStore } from '../../stores/appStore'
 import { RangeField } from './controls'
 
@@ -40,6 +40,12 @@ function ToggleRow({
 const VIEW_MODE_OPTIONS: Array<{ value: ChatViewMode; label: string }> = [
   { value: 'single', label: '单轮' },
   { value: 'path', label: '整条路径' }
+]
+
+const REASONING_OPTIONS: Array<{ value: ReasoningDisplay; label: string }> = [
+  { value: 'always', label: '默认展开' },
+  { value: 'collapsed', label: '折叠' },
+  { value: 'hidden', label: '隐藏' }
 ]
 
 export function ChatSection() {
@@ -104,6 +110,40 @@ export function ChatSection() {
         <span className="text-[10px] text-fg-subtle">
           用户消息超过该行数时默认折叠；折叠后的消息（含 AI 回答）统一显示该行数。
         </span>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h3 className="text-xs font-medium text-fg">思考过程</h3>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] text-fg-muted">模型思考内容</span>
+          <div className="flex gap-1">
+            {REASONING_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => updateChat({ reasoningDisplay: option.value })}
+                className={`rounded-md border px-2 py-1 text-[11px] ${
+                  chat.reasoningDisplay === option.value
+                    ? 'border-accent bg-accent/15 text-accent'
+                    : 'border-border text-fg-muted hover:bg-card-muted'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-fg-subtle">
+            仅对启用「推理」能力的模型生效；思考内容不会加入后续对话上下文。
+          </span>
+        </div>
+        <RangeField
+          label="折叠时显示的行数"
+          value={chat.reasoningFoldLines}
+          min={3}
+          max={40}
+          format={(value) => `${value} 行`}
+          onChange={(reasoningFoldLines) => updateChat({ reasoningFoldLines })}
+        />
       </section>
     </div>
   )

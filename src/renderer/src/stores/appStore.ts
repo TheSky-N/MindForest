@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AppInfo,
   AppPreferences,
+  ChatAttachmentInput,
   ChatDeltaEvent,
   ChatDoneEvent,
   ChatErrorEvent,
@@ -16,6 +17,7 @@ import type {
   NodePathEntry,
   Project,
   QuoteInput,
+  SearchResult,
   TaskPreferences,
   TurnNode
 } from '@shared/types'
@@ -31,6 +33,12 @@ export const TASK_PREFERENCES_KEY = 'preferences.tasks'
 export const LAYOUT_STORAGE_KEY = 'mindforest.layout.v1'
 export const TABS_STORAGE_KEY = 'mindforest.tabs.v1'
 
+export interface TreeViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
 export interface TabState {
   id: string
   projectId: string
@@ -44,6 +52,9 @@ export interface TabState {
   pendingQuotes: QuoteInput[]
   streaming: { requestId: string; nodeId: string } | null
   streamContent: string
+  streamReasoning: string
+  draft: string
+  viewport: TreeViewport | null
   loaded: boolean
 }
 
@@ -60,6 +71,9 @@ export const EMPTY_TAB: TabState = {
   pendingQuotes: [],
   streaming: null,
   streamContent: '',
+  streamReasoning: '',
+  draft: '',
+  viewport: null,
   loaded: false
 }
 
@@ -68,6 +82,8 @@ interface PersistedTab {
   projectId: string
   activeNodeId: string | null
   previewNodeId: string | null
+  draft?: string
+  viewport?: TreeViewport | null
 }
 
 interface AppState {
@@ -104,7 +120,10 @@ interface AppState {
   openNode: (nodeId: string, mode: 'preview' | 'enter') => Promise<void>
   enterFromPreview: () => Promise<void>
   closeNode: () => void
-  sendMessage: (content: string) => Promise<void>
+  openSearchResult: (result: SearchResult) => Promise<void>
+  setTabDraft: (tabId: string, draft: string) => void
+  setTabViewport: (tabId: string, viewport: TreeViewport) => void
+  sendMessage: (content: string, attachments?: ChatAttachmentInput[]) => Promise<void>
   regenerate: (nodeId: string) => Promise<void>
   cancelStream: () => Promise<void>
   applyDelta: (event: ChatDeltaEvent) => void
@@ -202,7 +221,20 @@ function readStoredTabs(): { tabs: PersistedTab[]; activeTabId: string | null } 
             id: tab.id,
             projectId: tab.projectId,
             activeNodeId: typeof tab.activeNodeId === 'string' ? tab.activeNodeId : null,
-            previewNodeId: typeof tab.previewNodeId === 'string' ? tab.previewNodeId : null
+            previewNodeId: typeof tab.previewNodeId === 'string' ? tab.previewNodeId : null,
+            draft: typeof tab.draft === 'string' ? tab.draft : '',
+            viewport:
+              typeof tab.viewport === 'object' &&
+              tab.viewport !== null &&
+              Number.isFinite(Number(tab.viewport.x)) &&
+              Number.isFinite(Number(tab.viewport.y)) &&
+              Number.isFinite(Number(tab.viewport.zoom))
+                ? {
+                    x: Number(tab.viewport.x),
+                    y: Number(tab.viewport.y),
+                    zoom: Number(tab.viewport.zoom)
+                  }
+                : null
           }))
       : []
     const activeTabId = typeof record.activeTabId === 'string' ? record.activeTabId : null
@@ -220,6 +252,7 @@ function newTabId(): string {
 
 export const useAppStore = create<AppState>((set, get) => {
   const streamBuffers = new Map<string, string>()
+  const reasoningBuffers = new Map<string, string>()
   const flushHandles = new Map<string, number>()
 
   const findTab = (tabId: string | null): TabState | null =>
@@ -233,6 +266,8 @@ export const useAppStore = create<AppState>((set, get) => {
     }))
   }
 
+  let persistTimer: number | null = null
+
   const persistTabs = (): void => {
     try {
       const { tabs, activeTabId } = get()
@@ -241,7 +276,9 @@ export const useAppStore = create<AppState>((set, get) => {
           id: tab.id,
           projectId: tab.projectId,
           activeNodeId: tab.activeNodeId,
-          previewNodeId: tab.previewNodeId
+          previewNodeId: tab.previewNodeId,
+          draft: tab.draft,
+          viewport: tab.viewport
         })),
         activeTabId
       }
@@ -249,6 +286,14 @@ export const useAppStore = create<AppState>((set, get) => {
     } catch {
       void 0
     }
+  }
+
+  const schedulePersistTabs = (): void => {
+    if (persistTimer !== null) window.clearTimeout(persistTimer)
+    persistTimer = window.setTimeout(() => {
+      persistTimer = null
+      persistTabs()
+    }, 250)
   }
 
   const loadTabTree = async (tabId: string): Promise<void> => {
@@ -293,7 +338,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
   const cancelTabStream = (tab: TabState | null): void => {
     if (!tab?.streaming) return
-    void window.mindforest.chat.cancel({ requestId: tab.streaming.requestId }).catch(() => undefined)
+    void window.mindforest.chat
+      .cancel({ requestId: tab.streaming.requestId })
+      .catch(() => undefined)
   }
 
   const activateTabInternal = async (tabId: string): Promise<void> => {
@@ -376,13 +423,13 @@ export const useAppStore = create<AppState>((set, get) => {
         const projectIds = new Set(projects.map((project) => project.id))
         const stored = readStoredTabs()
         const restored = stored.tabs.filter((tab) => projectIds.has(tab.projectId))
-        let tabs: TabState[] = restored.map((tab) =>
-          makeTab(tab.id, tab.projectId)
-        )
+        let tabs: TabState[] = restored.map((tab) => makeTab(tab.id, tab.projectId))
         tabs = tabs.map((tab, index) => ({
           ...tab,
           activeNodeId: restored[index]?.activeNodeId ?? null,
-          previewNodeId: restored[index]?.previewNodeId ?? null
+          previewNodeId: restored[index]?.previewNodeId ?? null,
+          draft: restored[index]?.draft ?? '',
+          viewport: restored[index]?.viewport ?? null
         }))
         if (tabs.length === 0 && projects.length > 0) {
           tabs = [makeTab(newTabId(), projects[0]!.id)]
@@ -597,7 +644,25 @@ export const useAppStore = create<AppState>((set, get) => {
       persistTabs()
     },
 
-    sendMessage: async (content) => {
+    openSearchResult: async (result) => {
+      const state = get()
+      const existing = state.tabs.find((tab) => tab.projectId === result.projectId)
+      if (existing) await get().activateTab(existing.id)
+      else await get().openProjectTab(result.projectId)
+      await get().openNode(result.nodeId, 'preview')
+    },
+
+    setTabDraft: (tabId, draft) => {
+      patchTab(tabId, { draft })
+      schedulePersistTabs()
+    },
+
+    setTabViewport: (tabId, viewport) => {
+      patchTab(tabId, { viewport })
+      schedulePersistTabs()
+    },
+
+    sendMessage: async (content, attachments) => {
       const tab = getActiveTab()
       if (!tab || tab.streaming) return
       set({ busy: true })
@@ -606,13 +671,17 @@ export const useAppStore = create<AppState>((set, get) => {
           projectId: tab.projectId,
           parentId: tab.activeNodeId,
           content,
-          quotes: tab.pendingQuotes.length > 0 ? tab.pendingQuotes : undefined
+          quotes: tab.pendingQuotes.length > 0 ? tab.pendingQuotes : undefined,
+          attachments: attachments && attachments.length > 0 ? attachments : undefined
         })
         streamBuffers.set(tab.id, '')
+        reasoningBuffers.set(tab.id, '')
         patchTab(tab.id, {
           pendingQuotes: [],
+          draft: '',
           streaming: { requestId: result.requestId, nodeId: result.node.id },
           streamContent: '',
+          streamReasoning: '',
           activeNodeId: result.node.id,
           previewNodeId: result.node.id
         })
@@ -635,9 +704,11 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const result = await window.mindforest.chat.regenerate({ nodeId })
         streamBuffers.set(tab.id, '')
+        reasoningBuffers.set(tab.id, '')
         patchTab(tab.id, {
           streaming: { requestId: result.requestId, nodeId: result.node.id },
           streamContent: '',
+          streamReasoning: '',
           activeNodeId: result.node.id,
           previewNodeId: result.node.id
         })
@@ -666,12 +737,19 @@ export const useAppStore = create<AppState>((set, get) => {
     applyDelta: (event) => {
       const tab = get().tabs.find((item) => item.streaming?.requestId === event.requestId)
       if (!tab) return
-      const buffer = (streamBuffers.get(tab.id) ?? '') + event.delta
-      streamBuffers.set(tab.id, buffer)
+      if (event.delta) {
+        streamBuffers.set(tab.id, (streamBuffers.get(tab.id) ?? '') + event.delta)
+      }
+      if (event.reasoningDelta) {
+        reasoningBuffers.set(tab.id, (reasoningBuffers.get(tab.id) ?? '') + event.reasoningDelta)
+      }
       if (flushHandles.has(tab.id)) return
       const handle = requestAnimationFrame(() => {
         flushHandles.delete(tab.id)
-        patchTab(tab.id, { streamContent: streamBuffers.get(tab.id) ?? '' })
+        patchTab(tab.id, {
+          streamContent: streamBuffers.get(tab.id) ?? '',
+          streamReasoning: reasoningBuffers.get(tab.id) ?? ''
+        })
       })
       flushHandles.set(tab.id, handle)
     },
@@ -685,6 +763,7 @@ export const useAppStore = create<AppState>((set, get) => {
         flushHandles.delete(tab.id)
       }
       streamBuffers.delete(tab.id)
+      reasoningBuffers.delete(tab.id)
       const node = event.node as TurnNode
       set((state) => ({
         tabs: state.tabs.map((item) =>
@@ -705,21 +784,20 @@ export const useAppStore = create<AppState>((set, get) => {
                     : meta
                 ),
                 streaming: null,
-                streamContent: ''
+                streamContent: '',
+                streamReasoning: ''
               }
             : item
         ),
-        error:
-          node.assistantStatus === 'error' ? (node.assistantError ?? '生成失败') : state.error
+        error: node.assistantStatus === 'error' ? (node.assistantError ?? '生成失败') : state.error
       }))
       void loadTabTree(tab.id)
     },
 
     editNode: async (nodeId, content, syncGroup) => {
-      await runNodeMutation(
-        () => window.mindforest.tree.editNode({ nodeId, content, syncGroup }),
-        { refreshPath: true }
-      )
+      await runNodeMutation(() => window.mindforest.tree.editNode({ nodeId, content, syncGroup }), {
+        refreshPath: true
+      })
     },
 
     editNodeBranchAndSend: async (nodeId, content) => {
@@ -743,9 +821,11 @@ export const useAppStore = create<AppState>((set, get) => {
               : undefined
         })
         streamBuffers.set(tab.id, '')
+        reasoningBuffers.set(tab.id, '')
         patchTab(tab.id, {
           streaming: { requestId: result.requestId, nodeId: result.node.id },
           streamContent: '',
+          streamReasoning: '',
           activeNodeId: result.node.id,
           previewNodeId: result.node.id
         })
@@ -991,9 +1071,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((tab) => {
           if (!tab.clusters.some((item) => item.id === cluster.id)) return tab
-          const clusters = tab.clusters.map((item) =>
-            item.id === cluster.id ? cluster : item
-          )
+          const clusters = tab.clusters.map((item) => (item.id === cluster.id ? cluster : item))
           return { ...tab, clusters, membership: buildMembership(clusters) }
         })
       }))
@@ -1132,9 +1210,7 @@ export const useAppStore = create<AppState>((set, get) => {
 })
 
 export function useActiveTab(): TabState {
-  return useAppStore(
-    (state) => state.tabs.find((tab) => tab.id === state.activeTabId) ?? EMPTY_TAB
-  )
+  return useAppStore((state) => state.tabs.find((tab) => tab.id === state.activeTabId) ?? EMPTY_TAB)
 }
 
 export function useEffectiveMode(): 'light' | 'dark' {

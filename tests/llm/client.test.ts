@@ -5,6 +5,7 @@ import { buildChatCompletionsUrl, completeChat, streamChatCompletion } from '@ma
 
 let server: Server
 let baseUrl: string
+let retryAttempts = 0
 
 function readBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -63,6 +64,25 @@ beforeAll(async () => {
         response.end('{"error":"boom"}')
         return
       }
+      if (url === '/v1/reasoning/chat/completions') {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        response.write('data: {"choices":[{"delta":{"reasoning_content":"先想"}}]}\n\n')
+        response.write('data: {"choices":[{"delta":{"content":"再答"}}]}\n\n')
+        response.end('data: [DONE]\n\n')
+        return
+      }
+      if (url === '/v1/retry/chat/completions') {
+        retryAttempts += 1
+        if (retryAttempts < 3) {
+          response.writeHead(503, { 'Content-Type': 'application/json' })
+          response.end('{"error":"busy"}')
+          return
+        }
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        response.write('data: {"choices":[{"delta":{"content":"重试成功"}}]}\n\n')
+        response.end('data: [DONE]\n\n')
+        return
+      }
       if (url === '/v1/slow/chat/completions') {
         response.writeHead(200, { 'Content-Type': 'text/event-stream' })
         response.write('data: {"choices":[{"delta":{"content":"a"}}]}\n\n')
@@ -106,6 +126,34 @@ describe('LLM 客户端', () => {
     expect(result.content).toBe('你好')
     expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 2 })
     expect(deltas).toEqual(['你', '好'])
+  })
+
+  it('解析 reasoning_content 并回调', async () => {
+    const reasoningDeltas: string[] = []
+    const contentDeltas: string[] = []
+    const result = await streamChatCompletion({
+      baseUrl: `${baseUrl}/v1/reasoning`,
+      model: 'test-model',
+      messages: [{ role: 'user', content: '你好' }],
+      onReasoningDelta: (delta) => reasoningDeltas.push(delta),
+      onDelta: (delta) => contentDeltas.push(delta)
+    })
+    expect(result.reasoning).toBe('先想')
+    expect(result.content).toBe('再答')
+    expect(reasoningDeltas).toEqual(['先想'])
+    expect(contentDeltas).toEqual(['再答'])
+  })
+
+  it('503 会自动退避重试', async () => {
+    retryAttempts = 0
+    const result = await streamChatCompletion({
+      baseUrl: `${baseUrl}/v1/retry`,
+      model: 'test-model',
+      messages: [{ role: 'user', content: '你好' }],
+      maxRetries: 2
+    })
+    expect(result.content).toBe('重试成功')
+    expect(retryAttempts).toBe(3)
   })
 
   it('兼容 Ollama 风格的 usage 字段', async () => {

@@ -40,7 +40,11 @@ describe('节点标题服务', () => {
       nodeId: node.id,
       profile: { baseUrl: 'http://localhost:1/v1', model: 'm', temperature: 0.3 },
       completeFn: async (options) => {
-        capturedPrompt = options.messages[0]?.content ?? ''
+        const content = options.messages[0]?.content
+        capturedPrompt =
+          typeof content === 'string'
+            ? content
+            : (content ?? []).map((part) => (part.type === 'text' ? part.text : '')).join('')
         return '标题：递归入门'
       }
     })

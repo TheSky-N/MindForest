@@ -102,6 +102,7 @@ export function createNodeRepository(db: AppDatabase) {
         title: null,
         titleGenerated: false,
         assistantContent: '',
+        assistantReasoning: '',
         assistantStatus: 'streaming',
         assistantError: null,
         model: input.model ?? null,
@@ -141,7 +142,8 @@ export function createNodeRepository(db: AppDatabase) {
       id: string,
       content: string,
       model?: string | null,
-      usage?: TokenUsage
+      usage?: TokenUsage,
+      reasoning?: string
     ): TurnNode {
       const patch: Partial<typeof nodes.$inferInsert> = {
         assistantContent: content,
@@ -150,6 +152,7 @@ export function createNodeRepository(db: AppDatabase) {
         updatedAt: new Date()
       }
       if (model !== undefined) patch.model = model
+      if (reasoning !== undefined) patch.assistantReasoning = reasoning
       if (usage) {
         patch.promptTokens = usage.promptTokens
         patch.completionTokens = usage.completionTokens
@@ -158,12 +161,13 @@ export function createNodeRepository(db: AppDatabase) {
       return repo.getOrThrow(id)
     },
 
-    abortAssistant(id: string, content: string, usage?: TokenUsage): TurnNode {
+    abortAssistant(id: string, content: string, usage?: TokenUsage, reasoning?: string): TurnNode {
       const patch: Partial<typeof nodes.$inferInsert> = {
         assistantContent: content,
         assistantStatus: 'aborted',
         updatedAt: new Date()
       }
+      if (reasoning !== undefined) patch.assistantReasoning = reasoning
       if (usage) {
         patch.promptTokens = usage.promptTokens
         patch.completionTokens = usage.completionTokens
@@ -172,13 +176,20 @@ export function createNodeRepository(db: AppDatabase) {
       return repo.getOrThrow(id)
     },
 
-    failAssistant(id: string, error: string, content?: string, usage?: TokenUsage): TurnNode {
+    failAssistant(
+      id: string,
+      error: string,
+      content?: string,
+      usage?: TokenUsage,
+      reasoning?: string
+    ): TurnNode {
       const patch: Partial<typeof nodes.$inferInsert> = {
         assistantStatus: 'error',
         assistantError: error,
         updatedAt: new Date()
       }
       if (content !== undefined) patch.assistantContent = content
+      if (reasoning !== undefined) patch.assistantReasoning = reasoning
       if (usage) {
         patch.promptTokens = usage.promptTokens
         patch.completionTokens = usage.completionTokens
@@ -261,10 +272,7 @@ export function createNodeRepository(db: AppDatabase) {
     },
 
     restore(id: string): void {
-      db.update(nodes)
-        .set({ deletedAt: null, updatedAt: new Date() })
-        .where(eq(nodes.id, id))
-        .run()
+      db.update(nodes).set({ deletedAt: null, updatedAt: new Date() }).where(eq(nodes.id, id)).run()
     },
 
     purge(id: string): void {

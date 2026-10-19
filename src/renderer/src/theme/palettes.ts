@@ -271,7 +271,17 @@ export function normalizeChatPreferences(value: unknown): ChatPreferences {
         ? record.renderAssistantMarkdown
         : DEFAULT_CHAT_PREFERENCES.renderAssistantMarkdown,
     foldLines: clampNumber(record.foldLines, 3, 50, DEFAULT_CHAT_PREFERENCES.foldLines),
-    viewMode: record.viewMode === 'path' ? 'path' : DEFAULT_CHAT_PREFERENCES.viewMode
+    viewMode: record.viewMode === 'path' ? 'path' : DEFAULT_CHAT_PREFERENCES.viewMode,
+    reasoningDisplay:
+      record.reasoningDisplay === 'always' || record.reasoningDisplay === 'hidden'
+        ? record.reasoningDisplay
+        : DEFAULT_CHAT_PREFERENCES.reasoningDisplay,
+    reasoningFoldLines: clampNumber(
+      record.reasoningFoldLines,
+      3,
+      40,
+      DEFAULT_CHAT_PREFERENCES.reasoningFoldLines
+    )
   }
 }
 
@@ -279,18 +289,8 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
   const record = asRecord(value)
   return {
     scale: clampNumber(record.scale, 75, 150, DEFAULT_UI_PREFERENCES.scale),
-    baseFontSize: clampNumber(
-      record.baseFontSize,
-      12,
-      20,
-      DEFAULT_UI_PREFERENCES.baseFontSize
-    ),
-    chatFontSize: clampNumber(
-      record.chatFontSize,
-      12,
-      20,
-      DEFAULT_UI_PREFERENCES.chatFontSize
-    ),
+    baseFontSize: clampNumber(record.baseFontSize, 12, 20, DEFAULT_UI_PREFERENCES.baseFontSize),
+    chatFontSize: clampNumber(record.chatFontSize, 12, 20, DEFAULT_UI_PREFERENCES.chatFontSize),
     markdownHeadingScale: clampNumber(
       record.markdownHeadingScale,
       80,
@@ -336,9 +336,7 @@ export function normalizePreferences(value: unknown): AppPreferences {
     fontUi: typeof record.fontUi === 'string' ? record.fontUi : '',
     fontCode: typeof record.fontCode === 'string' ? record.fontCode : '',
     tree: {
-      aspect: isTreeAspect(treeRecord.aspect)
-        ? treeRecord.aspect
-        : DEFAULT_TREE_APPEARANCE.aspect,
+      aspect: isTreeAspect(treeRecord.aspect) ? treeRecord.aspect : DEFAULT_TREE_APPEARANCE.aspect,
       shape: isTreeShape(treeRecord.shape) ? treeRecord.shape : DEFAULT_TREE_APPEARANCE.shape,
       edge: isTreeEdge(treeRecord.edge) ? treeRecord.edge : DEFAULT_TREE_APPEARANCE.edge,
       palettes: migration.palettes,

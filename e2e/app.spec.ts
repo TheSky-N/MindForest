@@ -276,7 +276,9 @@ test('主题对话树：簇折叠、主分支、归档与单击双击', async ()
         count: document.querySelectorAll('.react-flow__node:not([data-id$=":box"])').length,
         hasCluster: Boolean(clusterNode),
         downward: Boolean(
-          first && clusterNode && clusterNode.getBoundingClientRect().top > first.getBoundingClientRect().top
+          first &&
+          clusterNode &&
+          clusterNode.getBoundingClientRect().top > first.getBoundingClientRect().top
         )
       }
     },
@@ -291,11 +293,14 @@ test('主题对话树：簇折叠、主分支、归档与单击双击', async ()
   await window.locator(`.react-flow__node[data-id="${firstId}"]`).dblclick()
   await expect(window.locator('text=预览中')).toHaveCount(0, { timeout: 5000 })
 
-  await window.evaluate(async ({ projectId, firstNodeId }) => {
-    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-    void projectId
-    await api.tree.setArchived({ nodeId: firstNodeId, archived: true })
-  }, { projectId: seeded.projectId, firstNodeId: firstId! })
+  await window.evaluate(
+    async ({ projectId, firstNodeId }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      void projectId
+      await api.tree.setArchived({ nodeId: firstNodeId, archived: true })
+    },
+    { projectId: seeded.projectId, firstNodeId: firstId! }
+  )
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
   await window.waitForSelector('.react-flow__node')
@@ -305,15 +310,23 @@ test('主题对话树：簇折叠、主分支、归档与单击双击', async ()
   )
   expect(archivedCount).toBe(1)
 
-  await window.evaluate(async ({ firstNodeId }) => {
-    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-    await api.tree.setArchived({ nodeId: firstNodeId, archived: false })
-    await api.tree.setClusterCollapsed({ id: 'placeholder', collapsed: false }).catch(() => undefined)
-  }, { firstNodeId: firstId! })
-  await window.evaluate(async ({ clusterId }) => {
-    const api = (window as unknown as { mindforest: MindForestApi }).mindforest
-    await api.tree.setClusterCollapsed({ id: clusterId, collapsed: false })
-  }, { clusterId: seeded.clusterId })
+  await window.evaluate(
+    async ({ firstNodeId }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      await api.tree.setArchived({ nodeId: firstNodeId, archived: false })
+      await api.tree
+        .setClusterCollapsed({ id: 'placeholder', collapsed: false })
+        .catch(() => undefined)
+    },
+    { firstNodeId: firstId! }
+  )
+  await window.evaluate(
+    async ({ clusterId }) => {
+      const api = (window as unknown as { mindforest: MindForestApi }).mindforest
+      await api.tree.setClusterCollapsed({ id: clusterId, collapsed: false })
+    },
+    { clusterId: seeded.clusterId }
+  )
   await window.reload()
   await window.waitForLoadState('domcontentloaded')
   await window.waitForSelector('.react-flow__node')
@@ -587,13 +600,13 @@ test('多标签页：并行生成、切换恢复与持久化', async () => {
       () =>
         new Promise<boolean>((resolve, reject) => {
           const timeout = setTimeout(() => reject(new Error('等待完成事件超时')), 15000)
-          const off = (
-            window as unknown as { mindforest: MindForestApi }
-          ).mindforest.chat.onDone(() => {
-            off()
-            clearTimeout(timeout)
-            resolve(true)
-          })
+          const off = (window as unknown as { mindforest: MindForestApi }).mindforest.chat.onDone(
+            () => {
+              off()
+              clearTimeout(timeout)
+              resolve(true)
+            }
+          )
         })
     )
 
@@ -688,29 +701,25 @@ test('重命名、复制、标点输入与外观设置', async () => {
   await window.waitForSelector('.react-flow__node')
   await window.waitForTimeout(900)
 
-  await window
-    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
-    .click({ button: 'right' })
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`).click({ button: 'right' })
   await window.locator('text=重命名节点').click()
-  await window.locator('input').last().fill('手动标题')
+  await window.locator('input:not([type="file"])').last().fill('手动标题')
   await window.locator('button:has-text("保存")').click()
   await window.waitForTimeout(400)
-  await expect(
-    window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
-  ).toContainText('手动标题')
+  await expect(window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)).toContainText(
+    '手动标题'
+  )
 
-  await window
-    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
-    .click({ button: 'right' })
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click({ button: 'right' })
   await window.locator('text=AI 生成标题').click()
   await window.waitForTimeout(900)
-  await expect(
-    window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
-  ).toContainText('递归入门')
+  await expect(window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)).toContainText(
+    '递归入门'
+  )
 
   await window.locator('button:has-text("重命名测试")').first().hover()
   await window.locator('button[title="重命名项目"]').first().click()
-  await window.locator('input').last().fill('改名后的项目')
+  await window.locator('input:not([type="file"])').last().fill('改名后的项目')
   await window.locator('button:has-text("保存")').click()
   await window.waitForTimeout(400)
   await expect(window.locator('button:has-text("改名后的项目")').first()).toBeVisible()
@@ -761,9 +770,7 @@ test('重命名、复制、标点输入与外观设置', async () => {
     .first()
     .evaluate((element) => getComputedStyle(element).fontSize)
   expect(answerFontSize).toBe('18px')
-  const rootFontSize = await window.evaluate(
-    () => document.documentElement.style.fontSize
-  )
+  const rootFontSize = await window.evaluate(() => document.documentElement.style.fontSize)
   expect(rootFontSize).toBe('17px')
   const mainBackground = await window
     .locator(`.react-flow__node[data-id="${seeded.ids[2]}"] > div`)
@@ -835,19 +842,17 @@ test('v0.2.4：新开分支编辑、Markdown 段落与深层主分支', async ()
       () =>
         new Promise<boolean>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error('timeout')), 15000)
-          const off = (
-            window as unknown as { mindforest: MindForestApi }
-          ).mindforest.chat.onDone(() => {
-            off()
-            clearTimeout(t)
-            resolve(true)
-          })
+          const off = (window as unknown as { mindforest: MindForestApi }).mindforest.chat.onDone(
+            () => {
+              off()
+              clearTimeout(t)
+              resolve(true)
+            }
+          )
         })
     )
 
-  await window
-    .locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`)
-    .click({ button: 'right' })
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[0]}"]`).click({ button: 'right' })
   await window.locator('text=编辑消息').click()
   await window.locator('textarea').last().fill('修改后的问题')
   const donePromise = waitDone()
@@ -870,15 +875,11 @@ test('v0.2.4：新开分支编辑、Markdown 段落与深层主分支', async ()
   expect(afterEdit.originalAlive).toBe(true)
   expect(afterEdit.siblings).toBe(2)
 
-  await window
-    .locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`)
-    .click({ button: 'right' })
+  await window.locator(`.react-flow__node[data-id="${seeded.ids[1]}"]`).click({ button: 'right' })
   await expect(window.locator('text=已是主分支')).toHaveCount(1)
   await window.keyboard.press('Escape')
   await window.waitForTimeout(200)
-  await window
-    .locator(`.react-flow__node[data-id="${seeded.regenId}"]`)
-    .click({ button: 'right' })
+  await window.locator(`.react-flow__node[data-id="${seeded.regenId}"]`).click({ button: 'right' })
   await window.locator('text=设为主分支').click()
   const flags = await window.evaluate(
     async ({ projectId, regenId, originalId }) => {
@@ -964,10 +965,7 @@ test('v0.2.4：卡内标签栏、折叠拖宽排序、从节点新建标签页�
   const firstBox = await window.locator('[data-tab-id]').first().boundingBox()
   const secondBox = await window.locator('[data-tab-id]').nth(1).boundingBox()
   if (!firstBox || !secondBox) throw new Error('未找到标签页')
-  await window.mouse.move(
-    firstBox.x + firstBox.width / 2,
-    firstBox.y + firstBox.height / 2
-  )
+  await window.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2)
   await window.mouse.down()
   await window.mouse.move(
     secondBox.x + secondBox.width / 2 + 30,

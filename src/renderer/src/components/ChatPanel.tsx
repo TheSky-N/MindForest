@@ -4,21 +4,33 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent
 } from 'react'
 import {
   ArrowRightToLine,
+  Brain,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Download,
+  FileText,
+  Paperclip,
   Pencil,
   RefreshCw,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react'
 import { Virtuoso } from 'react-virtuoso'
-import type { HistoryExportFormat, NodePathEntry } from '@shared/types'
+import type {
+  Attachment,
+  ChatAttachmentInput,
+  HistoryExportFormat,
+  NodePathEntry,
+  ReasoningDisplay
+} from '@shared/types'
 import { useAppStore, EMPTY_TAB, type TabState } from '../stores/appStore'
 import { Markdown } from './Markdown'
 import { CardShell } from './layout/CardShell'
@@ -86,11 +98,118 @@ function formatTokenCount(value: number | null): string {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value)
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`
+  return `${bytes}B`
+}
+
+function AttachmentView({ attachment }: { attachment: Attachment }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (attachment.kind !== 'image') return
+    let alive = true
+    void window.mindforest.attachments
+      .read({ id: attachment.id })
+      .then((result) => {
+        if (alive) setDataUrl(result?.dataUrl ?? null)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [attachment.id, attachment.kind])
+
+  if (attachment.kind === 'image') {
+    return (
+      <span
+        title={attachment.name}
+        className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2 py-1 text-[10px] text-fg-muted"
+      >
+        {dataUrl ? (
+          <img
+            src={dataUrl}
+            alt={attachment.name}
+            className="max-h-40 max-w-52 rounded object-contain"
+          />
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            <FileText className="h-3 w-3" />
+            {attachment.name}
+          </span>
+        )}
+      </span>
+    )
+  }
+
+  return (
+    <span
+      title={attachment.name}
+      className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2 py-1 text-[10px] text-fg-muted"
+    >
+      <FileText className="h-3 w-3 shrink-0" />
+      <span className="min-w-0 truncate">{attachment.name}</span>
+      <span className="shrink-0 text-fg-subtle">{formatFileSize(attachment.size)}</span>
+    </span>
+  )
+}
+
+function ReasoningBlock({
+  content,
+  streaming,
+  display,
+  foldLines
+}: {
+  content: string
+  streaming: boolean
+  display: ReasoningDisplay
+  foldLines: number
+}) {
+  const [expanded, setExpanded] = useState(display === 'always')
+  if (!content.trim() && !streaming) return null
+  if (display === 'hidden' && !streaming) return null
+  const showContent = expanded || streaming
+  return (
+    <div
+      data-reasoning
+      className="mb-1 rounded-lg border border-border/70 bg-card-muted/30 px-3 py-1.5"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-center gap-1.5 text-left text-[11px] text-fg-muted hover:text-fg"
+      >
+        <Brain className={`h-3.5 w-3.5 ${streaming ? 'animate-pulse text-accent' : ''}`} />
+        <span>{streaming ? '正在思考…' : '思考过程'}</span>
+        <span className="flex-1" />
+        {!streaming && (
+          <span className="text-[10px] text-fg-subtle">{expanded ? '折叠' : '展开'}</span>
+        )}
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
+      </button>
+      {showContent && (
+        <div
+          style={expanded ? { maxHeight: '20rem' } : lineClampStyle(foldLines)}
+          className="mt-1 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-fg-muted"
+        >
+          {content || '（等待思考内容…）'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NodeTurn({
   entry,
   focused,
   streaming,
   streamContent,
+  streamReasoning,
   versionLabel,
   onQuote
 }: {
@@ -98,6 +217,7 @@ function NodeTurn({
   focused: boolean
   streaming: boolean
   streamContent: string
+  streamReasoning: string
   versionLabel: string | null
   onQuote: (selection: QuoteSelection) => void
 }) {
@@ -108,17 +228,18 @@ function NodeTurn({
   const toggleAnswerCollapsed = useAppStore((state) => state.toggleAnswerCollapsed)
   const setUserCollapsed = useAppStore((state) => state.setUserCollapsed)
   const foldLines = useAppStore((state) => state.preferences.chat.foldLines)
+  const reasoningDisplay = useAppStore((state) => state.preferences.chat.reasoningDisplay)
+  const reasoningFoldLines = useAppStore((state) => state.preferences.chat.reasoningFoldLines)
   const renderUserMarkdown = useAppStore((state) => state.preferences.chat.renderUserMarkdown)
   const renderAssistantMarkdown = useAppStore(
     (state) => state.preferences.chat.renderAssistantMarkdown
   )
-  const groupCount = useAppStore(
-    (state) =>
-      entry.turnGroupId
-        ? selectActiveTabState(state).nodes.filter(
-            (node) => node.turnGroupId === entry.turnGroupId && !node.deletedAt
-          ).length
-        : 1
+  const groupCount = useAppStore((state) =>
+    entry.turnGroupId
+      ? selectActiveTabState(state).nodes.filter(
+          (node) => node.turnGroupId === entry.turnGroupId && !node.deletedAt
+        ).length
+      : 1
   )
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(entry.userContent)
@@ -133,10 +254,7 @@ function NodeTurn({
     try {
       await window.mindforest.app.copyText(text)
       setCopied(kind)
-      window.setTimeout(
-        () => setCopied((current) => (current === kind ? null : current)),
-        1500
-      )
+      window.setTimeout(() => setCopied((current) => (current === kind ? null : current)), 1500)
     } catch {
       void 0
     }
@@ -192,15 +310,14 @@ function NodeTurn({
       setDraft(entry.userContent)
       return
     }
-    const confirmed = window.confirm(
-      '覆盖修改将删除该节点的全部子节点（可在回收站恢复）。继续？'
-    )
+    const confirmed = window.confirm('覆盖修改将删除该节点的全部子节点（可在回收站恢复）。继续？')
     if (!confirmed) return
     await editNode(entry.id, trimmed, syncGroup)
     setEditing(false)
   }
 
   const assistantContent = streaming ? streamContent : entry.assistantContent
+  const reasoningContent = streaming ? streamReasoning : entry.assistantReasoning
   const hasAnswer = assistantContent.trim().length > 0
   const folded = !streaming && entry.answerCollapsed && hasAnswer
   const userFolded =
@@ -329,6 +446,13 @@ function NodeTurn({
                   entry.userContent
                 )}
               </div>
+              {entry.attachments.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {entry.attachments.map((attachment) => (
+                    <AttachmentView key={attachment.id} attachment={attachment} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           {(userFolded || userOverflow) && (
@@ -357,6 +481,13 @@ function NodeTurn({
           )}
         </div>
       )}
+
+      <ReasoningBlock
+        content={reasoningContent}
+        streaming={streaming}
+        display={reasoningDisplay}
+        foldLines={reasoningFoldLines}
+      />
 
       <div
         onMouseUp={handleMouseUp}
@@ -523,6 +654,7 @@ function PathList() {
   const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
   const streaming = useAppStore((state) => selectActiveTabState(state).streaming)
   const streamContent = useAppStore((state) => selectActiveTabState(state).streamContent)
+  const streamReasoning = useAppStore((state) => selectActiveTabState(state).streamReasoning)
   const allNodes = useAppStore((state) => selectActiveTabState(state).nodes)
   const viewMode = useAppStore((state) => state.preferences.chat.viewMode)
   const addPendingQuote = useAppStore((state) => state.addPendingQuote)
@@ -576,6 +708,7 @@ function PathList() {
               focused={entry.id === focusedNodeId}
               streaming={false}
               streamContent=""
+              streamReasoning=""
               versionLabel={versionLabelOf(entry)}
               onQuote={quoteSelection}
             />
@@ -588,6 +721,7 @@ function PathList() {
               focused
               streaming
               streamContent={streamContent}
+              streamReasoning={streamReasoning}
               versionLabel={versionLabelOf(streamingEntry)}
               onQuote={quoteSelection}
             />
@@ -613,6 +747,7 @@ function PathList() {
               focused={entry.id === focusedNodeId}
               streaming={false}
               streamContent=""
+              streamReasoning=""
               versionLabel={versionLabelOf(entry)}
               onQuote={quoteSelection}
             />
@@ -627,6 +762,7 @@ function PathList() {
                   focused
                   streaming
                   streamContent={streamContent}
+                  streamReasoning={streamReasoning}
                   versionLabel={versionLabelOf(streamingEntry)}
                   onQuote={quoteSelection}
                 />
@@ -638,33 +774,86 @@ function PathList() {
   )
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('读取附件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
 function Composer() {
+  const activeTabId = useAppStore((state) => state.activeTabId)
   const activeProjectId = useAppStore((state) => selectActiveTabState(state).projectId || null)
   const nodes = useAppStore((state) => selectActiveTabState(state).nodes)
   const activeNodeId = useAppStore((state) => selectActiveTabState(state).activeNodeId)
   const previewNodeId = useAppStore((state) => selectActiveTabState(state).previewNodeId)
   const streaming = useAppStore((state) => selectActiveTabState(state).streaming)
+  const draft = useAppStore((state) => selectActiveTabState(state).draft)
   const busy = useAppStore((state) => state.busy)
   const activeProfile = useAppStore((state) => state.profiles.find((profile) => profile.isActive))
   const pendingQuotes = useAppStore((state) => selectActiveTabState(state).pendingQuotes)
   const removePendingQuote = useAppStore((state) => state.removePendingQuote)
+  const setTabDraft = useAppStore((state) => state.setTabDraft)
   const sendMessage = useAppStore((state) => state.sendMessage)
   const cancelStream = useAppStore((state) => state.cancelStream)
   const enterFromPreview = useAppStore((state) => state.enterFromPreview)
-  const [value, setValue] = useState('')
+  const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([])
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [inputHeight, setInputHeight] = useState(readStoredComposerHeight)
   const dragState = useRef<{ startY: number; startHeight: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isPreviewOnly = Boolean(previewNodeId && previewNodeId !== activeNodeId)
   const isFirstMessage = nodes.filter((node) => !node.deletedAt).length === 0 && !activeNodeId
-  const disabled =
-    !activeProjectId || !!streaming || busy || isPreviewOnly || value.trim().length === 0
+  const supportsVision = activeProfile?.capabilities.vision ?? false
+  const canSend = draft.trim().length > 0 || attachments.length > 0
+  const disabled = !activeProjectId || !!streaming || busy || isPreviewOnly || !canSend
 
   const submit = () => {
     if (disabled) return
-    const content = value
-    setValue('')
-    void sendMessage(content)
+    const content = draft.trim() || (attachments.length > 0 ? '请分析这些附件。' : '')
+    const payload = attachments
+    setAttachments([])
+    setAttachmentError(null)
+    if (activeTabId) setTabDraft(activeTabId, '')
+    void sendMessage(content, payload)
+  }
+
+  const pickAttachments = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+    setAttachmentError(null)
+    const remaining = Math.max(0, 8 - attachments.length)
+    const accepted: ChatAttachmentInput[] = []
+    for (const file of files.slice(0, remaining)) {
+      if (file.size > 12 * 1024 * 1024) {
+        setAttachmentError(`「${file.name}」超过 12MB，已跳过`)
+        continue
+      }
+      const isImage = file.type.startsWith('image/')
+      if (isImage && !supportsVision) {
+        setAttachmentError('当前模型未开启「视觉」能力，暂时不能上传图片')
+        continue
+      }
+      try {
+        const dataBase64 = await readFileAsDataUrl(file)
+        accepted.push({
+          kind: isImage ? 'image' : 'file',
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          dataBase64
+        })
+      } catch {
+        setAttachmentError(`「${file.name}」读取失败`)
+      }
+    }
+    if (files.length > remaining) {
+      setAttachmentError('单条消息最多 8 个附件')
+    }
+    if (accepted.length > 0) setAttachments((current) => [...current, ...accepted])
   }
 
   const startResize = (event: ReactMouseEvent) => {
@@ -745,11 +934,54 @@ function Composer() {
             ))}
           </div>
         )}
+        {attachmentError && <p className="mb-2 text-[11px] text-warning">{attachmentError}</p>}
+        {attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachments.map((attachment, index) => (
+              <span
+                key={`${attachment.name}-${index}`}
+                className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-fg-muted"
+              >
+                <FileText className="h-3 w-3 shrink-0" />
+                <span className="min-w-0 truncate">{attachment.name}</span>
+                <button
+                  type="button"
+                  title="移除附件"
+                  onClick={() =>
+                    setAttachments((current) => current.filter((_, item) => item !== index))
+                  }
+                  className="text-fg-subtle hover:text-danger"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept="image/*,.txt,.md,.markdown,.json,.jsonl,.csv,.tsv,.log,.yaml,.yml,.toml,.ini,.xml,.html,.htm,.css,.js,.jsx,.ts,.tsx,.py,.rs,.go,.java,.c,.h,.cpp,.sh,.sql"
+            onChange={(event) => void pickAttachments(event)}
+          />
+          <button
+            type="button"
+            title={supportsVision ? '添加图片或文本附件' : '添加文本附件（当前模型不支持图片）'}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!activeProjectId || !!streaming || isPreviewOnly}
+            className="mb-0.5 rounded-lg border border-border p-2 text-fg-muted hover:bg-card-muted enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <textarea
             style={{ height: inputHeight }}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
+            value={draft}
+            onChange={(event) => {
+              if (activeTabId) setTabDraft(activeTabId, event.target.value)
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()

@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseHandle } from '@main/db/client'
 import { createChatService } from '@main/chat/chatService'
-import type { StreamChatCompletionFn } from '@main/llm/client'
+import type { ChatMessage, StreamChatCompletionFn } from '@main/llm/client'
+import { createAttachmentRepository } from '@main/db/repositories/attachments'
 import { createNodeRepository } from '@main/db/repositories/nodes'
 import { createProjectRepository } from '@main/db/repositories/projects'
 import { createTestDatabase } from '../helpers'
@@ -252,5 +256,75 @@ describe('对话服务（节点模型）', () => {
         events: noopEvents
       })
     ).rejects.toThrow('父节点不属于该项目')
+  })
+
+  it('保存并流式推送推理内容', async () => {
+    let reasoningDelta = ''
+    const streamFn: StreamChatCompletionFn = async (options) => {
+      options.onReasoningDelta?.('先分析')
+      options.onDelta?.('结论')
+      return { content: '结论', reasoning: '先分析', usage: null }
+    }
+    const { service, nodes, project } = setup(streamFn)
+
+    const result = await service.send({
+      projectId: project.id,
+      parentId: null,
+      content: '问题',
+      profile,
+      events: {
+        ...noopEvents,
+        delta: (event) => {
+          reasoningDelta += event.reasoningDelta ?? ''
+        }
+      }
+    })
+    await flush()
+
+    expect(reasoningDelta).toBe('先分析')
+    expect(nodes.getOrThrow(result.node.id).assistantReasoning).toBe('先分析')
+  })
+
+  it('附件会落库并注入上下文', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mindforest-chat-attachments-'))
+    try {
+      let captured: ChatMessage[] = []
+      const streamFn: StreamChatCompletionFn = async (options) => {
+        captured = options.messages
+        options.onDelta?.('回答')
+        return { content: '回答', usage: null }
+      }
+      const projects = createProjectRepository(handle.db)
+      const project = projects.create({ name: '附件项目' })
+      const service = createChatService({
+        db: handle.db,
+        streamFn,
+        attachmentsRoot: root
+      })
+
+      const result = await service.send({
+        projectId: project.id,
+        parentId: null,
+        content: '读取附件',
+        attachments: [
+          {
+            kind: 'file',
+            name: 'note.txt',
+            mimeType: 'text/plain',
+            dataBase64: Buffer.from('附件里的内容').toString('base64')
+          }
+        ],
+        profile,
+        events: noopEvents
+      })
+      await flush()
+
+      const stored = createAttachmentRepository(handle.db).listByNode(result.node.id)
+      expect(stored).toHaveLength(1)
+      expect(stored[0]?.name).toBe('note.txt')
+      expect(JSON.stringify(captured)).toContain('附件里的内容')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

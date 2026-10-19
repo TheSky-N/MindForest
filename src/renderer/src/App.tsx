@@ -3,6 +3,7 @@ import { useAppStore, useEffectiveMode } from './stores/appStore'
 import { TopBar } from './components/TopBar'
 import { ResizableLayout } from './components/layout/ResizableLayout'
 import { SettingsDialog } from './components/settings/SettingsDialog'
+import { SearchDialog } from './components/SearchDialog'
 
 export default function App() {
   const initialize = useAppStore((state) => state.initialize)
@@ -10,6 +11,7 @@ export default function App() {
   const preferences = useAppStore((state) => state.preferences)
   const effectiveMode = useEffectiveMode()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   useEffect(() => {
     void initialize()
@@ -42,11 +44,19 @@ export default function App() {
       const mod = event.ctrlKey || event.metaKey
       if (mod && event.key.toLowerCase() === 'k') {
         event.preventDefault()
+        setSearchOpen(false)
         setSettingsOpen((open) => !open)
+        return
+      }
+      if (mod && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        setSettingsOpen(false)
+        setSearchOpen(true)
         return
       }
       if (event.key === 'Escape') {
         setSettingsOpen(false)
+        setSearchOpen(false)
         return
       }
       if (!mod) return
@@ -110,6 +120,14 @@ export default function App() {
         </div>
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenSettings={() => {
+          setSearchOpen(false)
+          setSettingsOpen(true)
+        }}
+      />
     </div>
   )
 }
